@@ -3,11 +3,11 @@ import json
 from datetime import datetime
 import time
 import os
+import argparse
 
 
+#  python3 API_bot_test.py --server="localhost"
 
-# Configuration
-API_URL = "http://localhost:5001/count_bot_v1"
 
 # Cas de test avec différentes combinaisons de critères
 test_cases = [
@@ -230,9 +230,9 @@ def compare(actual, operator, expected):
 
 
 # Get API key from environment variable
-API_KEY = os.getenv("API_KEY")
-if not API_KEY:
-    raise ValueError("API_KEY environment variable not set!")
+API_KEYS = os.getenv("API_KEYS")
+if not API_KEYS:
+    raise ValueError("API_KEYS environment variable not set!")
 
 API_URL = "http://localhost:5001/count_bot_v1"
 
@@ -242,7 +242,7 @@ def test_api(test_case):
     """
     headers = {
     "Content-Type": "application/json",
-    "X-API-Key": API_KEY  # Use X-API-Key instead of Authorization
+    "X-API-Key": API_KEYS  # Use X-API-Key instead of Authorization
 }
     #print("Sending request with headers test_api:", headers)
 
@@ -304,7 +304,6 @@ def run_all_tests(test_number: int = None):
             return []
     else:
         tests_to_run = list(enumerate(test_cases, 1))  # all tests
-
     for i, test_case in tests_to_run:
         print(f"Exécution du test {i}/{len(test_cases)}: {test_case['name']}")
 
@@ -352,15 +351,15 @@ def run_all_tests(test_number: int = None):
             for err in errors:
                 print(f"    - {err}")
 
-        # ---------- Individual activity counts ----------
-        activity_counts = response.get('activity_individual_counts')
-        if activity_counts:
-            print("  Individual activity_code counts:")
-            for code, info in activity_counts.items():
-                if isinstance(info, dict):
-                    print(f"    - {code}: {info.get('count_legal', 0)}")
-                else:
-                    print(f"    - {code}: {info}")
+            # ---------- Print individual counts for KO tests ----------
+            activity_counts = response.get('activity_individual_counts')
+            if activity_counts:
+                print("  Individual activity_code counts (KO test):")
+                for code, info in activity_counts.items():
+                    if isinstance(info, dict):
+                        print(f"    - {code}: {info.get('count_legal', 0)}")
+                    else:
+                        print(f"    - {code}: {info}")
 
         # ---------- Full JSON request ----------
         print("\n  Full request JSON:")
@@ -395,7 +394,7 @@ def run_all_tests(test_number: int = None):
             "results": results
         }, f, indent=2, ensure_ascii=False)
 
-    print(f"Résultats détaillés sauvegardés dans: {output_file}")
+    #print(f"Résultats détaillés sauvegardés dans: {output_file}")
     return results
 
 
@@ -452,25 +451,39 @@ def display_detailed_result(result):
     print("=" * 80)
 
 
+def main():
 
-if __name__ == "__main__":
+    API_KEYS = os.getenv("API_KEYS")
+    #print(f"API_KEYS:{API_KEYS}:")
+    if not API_KEYS:
+        raise ValueError("API_KEYS environment variable not set!")
 
+    parser = argparse.ArgumentParser(description="Run API tests or integration")
+    parser.add_argument(
+        "--server",
+        type=str,
+        required=True,
+        help="IP or hostname of the server where the API is running"
+    )
+    args = parser.parse_args()
+    server_ip = args.server
 
-    # Get API key from environment variable
-    API_KEY = os.getenv("API_KEY")
+    # Example: construct API URL dynamically
+    global API_URL
+    API_URL = f"http://{server_ip}:5001/count_bot_v1"
 
-    #print("API_KEY:", os.getenv("API_KEY"))
+    #print(f"Using API URL: {API_URL}")
 
-    if not API_KEY:
-        raise ValueError("API_KEY environment variable not set!")
-
-     # Run only test number 3
-    #results = run_all_tests(test_number=3)
+      # Run only test number 3
+    #results = run_all_tests(test_number=13)
     results = run_all_tests()
 
     # Display a detailed result
-    for idx, result in enumerate(results, 1):
-        print(f"\n\n=== Détail du test {idx} ===")
-        display_detailed_result(result)
+    # for idx, result in enumerate(results, 1):
+    #     print(f"\n\n=== Détail du test {idx} ===")
+    #     display_detailed_result(result)
     
     print("\n✓ Tests terminés!")
+
+if __name__ == "__main__":
+    main()

@@ -13,6 +13,8 @@ import time
 import json
 import copy
 from functools import wraps
+import socket
+
 
 
 # CREATE TABLE LogAPI_bot (
@@ -67,13 +69,13 @@ werkzeug_logger.setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 API_KEYS = os.getenv("API_KEYS", "").split(",")
-#print(f"API_KEYS:{API_KEYS}")
+#print(f"API_KEYS:{API_KEYS}:")
 
 
 app = Flask(__name__)
 
 # Configuration de la base de données MySQL
-DB_CONFIG = {
+DB_CONFIG_ekima = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'port': os.getenv('DB_PORT', 3306),
     'database': os.getenv('DB_NAME', 'webscan'),
@@ -83,6 +85,23 @@ DB_CONFIG = {
     'use_unicode': True
 }
 
+DB_CONFIG_ikoula3 = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', 3306),
+    'database': os.getenv('DB_NAME', 'webscan'),
+    'user': os.getenv('DB_USER', 'webscan'),
+    'password': os.getenv('DB_PASSWORD', 'Garenne2025&&'),
+    'charset': 'utf8mb4',
+    'use_unicode': True
+}
+
+hostname = socket.gethostname()
+if hostname == "frhb96148ds":
+    DB_CONFIG = DB_CONFIG_ikoula3
+elif hostname == "dhoop-NS5x-NS7xAU":
+    DB_CONFIG = DB_CONFIG_ekima
+
+#print(DB_CONFIG)
 # Mapping des champs API vers les champs de la base de données
 FIELD_MAPPING = {
     "post_code": "Code_postal",
@@ -468,6 +487,7 @@ def require_api_key(func):
         # print(f"API key received:{api_key}:")
 
         # print(f"API_KEYS:{API_KEYS}:")
+        # print(not api_key or api_key not in API_KEYS)
         if not api_key or api_key not in API_KEYS:
             return jsonify({"error": "Unauthorized: Invalid or missing API key"}), 401
 
