@@ -4,10 +4,12 @@ from datetime import datetime
 import time
 import os
 import argparse
+import hashlib
+import hmac
+import sys
 
 
 #  python3 API_bot_test.py --server="localhost"
-
 
 # Cas de test avec différentes combinaisons de critères
 test_cases = [
@@ -27,7 +29,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -45,7 +47,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -61,7 +63,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -73,7 +75,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -85,7 +87,7 @@ test_cases = [
             "financial_criteria": {"present": True, "turnover": 5_000_000, "net_profit": 200_000, "profitability": None},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -104,7 +106,7 @@ test_cases = [
                 "company_creation_date_inf": False
             }
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -122,7 +124,7 @@ test_cases = [
                 "subsidiaries_number": 5
             }
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -134,7 +136,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -144,9 +146,9 @@ test_cases = [
             "activity": {"present": True, "activity_codes_list": ["4690Z", "4617B"]},
             "company_size": {"present": False},
             "financial_criteria": {"present": True, "turnover": 1_000_000, "net_profit": 50_000, "profitability": 0.05},
-            "legal_criteria": {"present": True, "headquarters": True, "legal_category": "SAS"}
+            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5"}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -156,9 +158,9 @@ test_cases = [
             "activity": {"present": True, "activity_codes_list": ["6202A", "6311Z", "6312Z"]},
             "company_size": {"present": True, "employees_number_range": ["20 to 49 employees", "50 to 99 employees"]},
             "financial_criteria": {"present": True, "turnover": 2_000_000, "net_profit": 100_000, "profitability": 0.05},
-            "legal_criteria": {"present": True, "headquarters": True, "legal_category": "Societe commerciale", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 2}
+            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 2}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -170,7 +172,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True, "company_creation_date_threshold": "2023-01-01", "company_creation_date_sup": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -182,7 +184,7 @@ test_cases = [
             "financial_criteria": {"present": True, "turnover": 50_000_000, "net_profit": 2_000_000},
             "legal_criteria": {"present": True, "headquarters": True, "subsidiaries_number": 10}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -194,7 +196,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -206,7 +208,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": False}
         },
-        "expected": {"count_legal": {"op": ">=", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
     }
 
 ]
@@ -229,22 +231,53 @@ def compare(actual, operator, expected):
     raise ValueError(f"Unsupported operator: {operator}")
 
 
+API_KEYS = json.loads(os.getenv("API_KEYS"))
 # Get API key from environment variable
-API_KEYS = os.getenv("API_KEYS")
 if not API_KEYS:
     raise ValueError("API_KEYS environment variable not set!")
 
-API_URL = "http://localhost:5001/count_bot_v1"
+
+def get_server_from_argv(default="localhost"):
+    for arg in sys.argv[1:]:
+        if arg.startswith("--server="):
+            return arg.split("=", 1)[1]
+    return default
+
 
 def test_api(test_case):
     """
     Test the API with a specific test case including API key authentication
     """
+   
+    server      = get_server_from_argv()
+    base_url    = f"http://{server}:5001"
+
+    # Load API keys + secrets from env variable
+
+
+    API_KEYS    = json.loads(os.getenv("API_KEYS", "{}"))
+    # print("API_KEYS")
+    # print(API_KEYS)
+    # Choose the client you want to use
+    api_key = list(API_KEYS.keys())[0]       # take the first key (or pick specific)
+    secret = API_KEYS[api_key]
+
+    # Timestamp
+    timestamp = str(int(time.time()))
+
+    # HMAC signature
+    signature = hmac.new(
+        secret.encode(),
+        f"{api_key}{timestamp}".encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    # Send request
     headers = {
-    "Content-Type": "application/json",
-    "X-API-Key": API_KEYS  # Use X-API-Key instead of Authorization
-}
-    #print("Sending request with headers test_api:", headers)
+        "X-Api-Key": api_key,
+        "X-Timestamp": timestamp,
+        "X-Signature": signature
+    }
 
     try:
         response = requests.post(
@@ -470,12 +503,12 @@ def main():
 
     # Example: construct API URL dynamically
     global API_URL
-    API_URL = f"http://{server_ip}:5001/count_bot_v1"
+    API_URL = f"http://{server_ip}:5002/count_bot_v2"
 
     #print(f"Using API URL: {API_URL}")
 
       # Run only test number 3
-    #results = run_all_tests(test_number=13)
+    #results = run_all_tests(test_number=9)
     results = run_all_tests()
 
     # Display a detailed result

@@ -14,6 +14,8 @@ import json
 import copy
 from functools import wraps
 import socket
+import hmac
+import hashlib
 
 
 
@@ -68,8 +70,9 @@ werkzeug_logger.setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-API_KEYS = os.getenv("API_KEYS", "").split(",")
-#print(f"API_KEYS:{API_KEYS}:")
+
+AUTH_WINDOW_SECONDS = 300  # 5 minutes
+SECRET              = os.getenv("SECRET", "").split(",")
 
 
 app = Flask(__name__)
@@ -95,6 +98,53 @@ DB_CONFIG_ikoula3 = {
     'use_unicode': True
 }
 
+LEGAL_FORM_MAPPING = {
+  "legal_forms": [
+    {
+      "code": "1000",
+      "label": "Entrepreneur individuel"
+    },
+    {
+      "code": "2",
+      "label": "Personne morale de droit privé non dotée de la personnalité morale"
+    },
+    {
+      "code": "3",
+      "label": "Personne morale de droit étranger"
+    },
+    {
+      "code": "4",
+      "label": "Personne morale de droit public soumise au droit commercial"
+    },
+    {
+      "code": "5",
+      "label": "Société commerciale"
+    },
+    {
+      "code": "6",
+      "label": "Autre personne morale immatriculée au RCS"
+    },
+    {
+      "code": "7",
+      "label": "Personne morale et organisme soumis au droit administratif"
+    },
+    {
+      "code": "8",
+      "label": "Organisme privé spécialisé"
+    },
+    {
+      "code": "9",
+      "label": "Groupement de droit privé"
+    }
+  ]
+}
+
+LEGAL_FORM_CODE_TO_LABEL = {
+    item["code"]: item["label"]
+    for item in LEGAL_FORM_MAPPING["legal_forms"]
+}
+
+
 hostname = socket.gethostname()
 if hostname == "frhb96148ds":
     DB_CONFIG = DB_CONFIG_ikoula3
@@ -114,14 +164,16 @@ FIELD_MAPPING = {
     "turnover": "CA_le_plus_recent",
     "net_profit": "Resultat_net_le_plus_recent",
     "profitability": "Rentabilite_la_plus_recente",
-    "legal_category": "Categorie_juridique",
+    "legal_form": "Categorie_juridique",
     "headquarters": "Siege_entreprise",
     "company_creation_date_threshold": "Date_creation_entreprise",
     "capital": "Capital",
     "subsidiaries_number": "Nombre_etablissements"
 }
-TABLE = "sirene1225saasv9"
 
+MOIS_ANNEE = "1225"
+TABLE_FAST = f"sirene{MOIS_ANNEE}saasv9_bot"
+TABLE_ALL  = f"sirene{MOIS_ANNEE}saasv9"
 
 def insert_api_log(timestamp, request_json, duration, response_json):
     """
@@ -217,18 +269,43 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
         where_clauses.append(f"{field_name} = ?")
         params.append(value)
 
+from typing import Dict, Any, List
+
+
+def convert_legal_form_code_to_label(code: str) -> str | None:
+    """
+    Convertit un code legal_form (API) en libellé stocké en base MySQL
+    """
+    if code is None:
+        return None
+    return LEGAL_FORM_CODE_TO_LABEL.get(str(code))
 
 def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
     """
     Construit la requête SQL et les paramètres à partir des critères de ciblage
-    
+
     Returns:
         tuple: (query_string, parameters_list)
     """
-    where_clauses = []
-    params = []
-    
-   # Traitement de la localisation
+    where_clauses: List[str] = []
+    params: List[Any] = []
+
+    # ==============================
+    # Choix de la table selon headquarters
+    # ==============================
+
+    table = TABLE_ALL  # table par défaut
+
+    legal_criteria = criteria.get('legal_criteria', {})
+    if legal_criteria.get('present') and legal_criteria.get('headquarters') is not None:
+        if legal_criteria['headquarters'] is True:
+            table = TABLE_FAST
+        else:
+            table = TABLE_ALL
+
+    # ==============================
+    # Traitement de la localisation
+    # ==============================
     if criteria.get('location', {}).get('present'):
         loc = criteria['location']
 
@@ -259,18 +336,24 @@ def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
             FIELD_MAPPING['city'],
             loc.get('city')
         )
-        
+
+    # ==============================
     # Traitement de l'activité
+    # ==============================
     if criteria.get('activity', {}).get('present'):
         act = criteria['activity']
-        
+
         if act.get('activity_codes_list'):
             codes = act['activity_codes_list']
             placeholders = ','.join(['?'] * len(codes))
-            where_clauses.append(f"{FIELD_MAPPING['activity_codes_list']} IN ({placeholders})")
+            where_clauses.append(
+                f"{FIELD_MAPPING['activity_codes_list']} IN ({placeholders})"
+            )
             params.extend(codes)
-    
-     # Traitement de la taille de l'entreprise
+
+    # ==============================
+    # Traitement de la taille de l'entreprise
+    # ==============================
     if criteria.get('company_size', {}).get('present'):
         size = criteria['company_size']
         value = size.get('employees_number_range')
@@ -287,71 +370,94 @@ def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
                     f"{FIELD_MAPPING['employees_number_range']} = ?"
                 )
                 params.append(value)
-    
+
+    # ==============================
     # Traitement des critères financiers
+    # ==============================
     if criteria.get('financial_criteria', {}).get('present'):
         fin = criteria['financial_criteria']
-        
+
         if fin.get('turnover') is not None:
             where_clauses.append(f"{FIELD_MAPPING['turnover']} >= ?")
             params.append(fin['turnover'])
-        
+
         if fin.get('net_profit') is not None:
             where_clauses.append(f"{FIELD_MAPPING['net_profit']} >= ?")
             params.append(fin['net_profit'])
-        
+
         if fin.get('profitability') is not None:
             where_clauses.append(f"{FIELD_MAPPING['profitability']} >= ?")
             params.append(fin['profitability'])
-    
+
+    # ==============================
     # Traitement des critères légaux
-    if criteria.get('legal_criteria', {}).get('present'):
-        legal = criteria['legal_criteria']
-        
-        if legal.get('legal_category'):
-            where_clauses.append(f"{FIELD_MAPPING['legal_category']} = ?")
-            params.append(legal['legal_category'])
-        
-        if legal.get('headquarters') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['headquarters']} = ?")
-            params.append('oui' if legal['headquarters'] else 'non')
-        
+    # ==============================
+    if legal_criteria.get('present'):
+
+        legal = legal_criteria
+
+
+        if legal.get('legal_form'):
+            values = legal['legal_form']
+            if not isinstance(values, list):
+                values = [values]
+
+            labels = [
+                convert_legal_form_code_to_label(v)
+                for v in values
+                    if convert_legal_form_code_to_label(v)
+            ]
+
+            if labels:
+                placeholders = ",".join(["?"] * len(labels))
+                where_clauses.append(
+                    f"{FIELD_MAPPING['legal_form']} IN ({placeholders})"
+                )
+                params.extend(labels)
+
+        # ⚠️ headquarters volontairement ignoré ici
+        # car le choix de la table est déjà fait
+
         if legal.get('company_creation_date_threshold'):
             date_field = FIELD_MAPPING['company_creation_date_threshold']
-            
+
             if legal.get('company_creation_date_sup'):
                 where_clauses.append(f"{date_field} >= ?")
                 params.append(legal['company_creation_date_threshold'])
-            
+
             if legal.get('company_creation_date_inf'):
                 where_clauses.append(f"{date_field} <= ?")
                 params.append(legal['company_creation_date_threshold'])
-        
+
         if legal.get('capital') is not None:
             capital_field = FIELD_MAPPING['capital']
-            
+
             if legal.get('capital_threshold_sup'):
                 where_clauses.append(f"{capital_field} >= ?")
                 params.append(legal['capital'])
-            
+
             if legal.get('capital_threshold_inf'):
                 where_clauses.append(f"{capital_field} <= ?")
                 params.append(legal['capital'])
-        
+
         if legal.get('subsidiaries_number') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['subsidiaries_number']} >= ?")
+            where_clauses.append(
+                f"{FIELD_MAPPING['subsidiaries_number']} >= ?"
+            )
             params.append(legal['subsidiaries_number'])
-    
+
+    # ==============================
     # Construction de la requête finale
-    base_query = f"SELECT COUNT(*) as count FROM {TABLE}"
-    
+    # ==============================
+    base_query = f"SELECT COUNT(*) AS count FROM {table}"
+
     if where_clauses:
-        where_clause = " WHERE " + " AND ".join(where_clauses)
-        query = base_query + where_clause
+        query = base_query + " WHERE " + " AND ".join(where_clauses)
     else:
         query = base_query
-    
+
     return query, params
+
 
 
 
@@ -468,33 +574,54 @@ def count_semantic(original_request):
     # count siren from Nom_entreprise et Nom_enseigne
     # 
 
+
 def require_api_key(func):
+   
+
+    AUTH_WINDOW = 300  # 5 minutes
+
     @wraps(func)
     def decorated(*args, **kwargs):
-        # Normalize headers to lowercase for case-insensitive lookup
         headers = {k.lower(): v for k, v in request.headers.items()}
 
-        # Try X-Api-Key first
-        api_key = headers.get("x-api-key")
+        api_key     = headers.get("x-api-key")
+        timestamp   = headers.get("x-timestamp")
+        signature   = headers.get("x-signature")
 
-        # Fallback to Authorization header: Bearer <token>
-        if not api_key:
-            auth_header = headers.get("authorization")
-            if auth_header and auth_header.lower().startswith("bearer "):
-                api_key = auth_header.split(" ", 1)[1]
+        if not api_key or not timestamp or not signature:
+            return jsonify({"error": "Missing authentication headers"}), 401
 
-        # print("All headers received:", dict(request.headers))
-        # print(f"API key received:{api_key}:")
+        API_KEYS = json.loads(os.getenv("API_KEYS", "{}"))
 
-        # print(f"API_KEYS:{API_KEYS}:")
-        # print(not api_key or api_key not in API_KEYS)
-        if not api_key or api_key not in API_KEYS:
-            return jsonify({"error": "Unauthorized: Invalid or missing API key"}), 401
+        secret = API_KEYS.get(api_key)
+        if not secret:
+            return jsonify({"error": "Invalid API key"}), 401
+
+        # Timestamp validation
+        try:
+            timestamp = int(timestamp)
+        except ValueError:
+            return jsonify({"error": "Invalid timestamp"}), 401
+
+        if abs(time.time() - timestamp) > AUTH_WINDOW:
+            return jsonify({"error": "Expired request"}), 401
+
+        # Signature validation
+        message = f"{api_key}{timestamp}".encode()
+        expected = hmac.new(
+            secret.encode(),
+            message,
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected, signature):
+            return jsonify({"error": "Invalid signature"}), 401
 
         return func(*args, **kwargs)
+
     return decorated
 
-@app.route('/count_bot_v1', methods=['POST'])
+@app.route('/count_bot_v2', methods=['POST'])
 @require_api_key
 
 def count_companies():
@@ -632,7 +759,7 @@ def method_not_allowed(error):
 
 if __name__ == '__main__':
     # Pour le développement
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5002, debug=True)
     
     # Pour la production, utilisez un serveur WSGI comme Gunicorn:
     # gunicorn -w 4 -b 0.0.0.0:5000 app:app
