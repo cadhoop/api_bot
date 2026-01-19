@@ -17,6 +17,8 @@ import socket
 import unicodedata
 import hashlib
 import hmac
+import pandas as pd
+
 
 
 # -- 1️⃣ Drop the table if it already exists
@@ -404,6 +406,41 @@ MIN_FULLTEXT_LENGTH = 3
 
 
 
+
+# === CHARGEMENT DU RÉFÉRENTIEL INSEE ===
+def load_insee_referentiel(csv_path):
+    """
+    Charge le référentiel INSEE depuis un fichier CSV.
+    
+    Args:
+        csv_path: Chemin vers le fichier CSV
+        
+    Returns:
+        DataFrame avec les colonnes : nom_commune_complet, code_postal, 
+        nom_region, code_departement
+    """
+    df_insee = pd.read_csv(
+        csv_path,
+        dtype={
+            'code_postal': str,  # Important : garder en string pour éviter la perte des 0 initiaux
+            'code_departement': str
+        },
+        encoding='utf-8'
+    )
+    
+    # Nettoyer les espaces
+    df_insee['nom_commune_complet'] = df_insee['nom_commune_complet'].str.strip()
+    df_insee['nom_region'] = df_insee['nom_region'].str.strip()
+    df_insee['code_postal'] = df_insee['code_postal'].str.strip()
+    df_insee['code_departement'] = df_insee['code_departement'].str.strip()
+    
+    return df_insee
+
+
+
+# Chargement du référentiel INSEE (à faire une seule fois au démarrage)
+df_insee = load_insee_referentiel('communes-departement-region.csv')
+
 def insert_api_log(timestamp, request_json, duration, response_json):
     """
     Inserts an API call log into the LogAPI_bot table
@@ -428,6 +465,61 @@ def insert_api_log(timestamp, request_json, duration, response_json):
         logger.error("Failed to log API call: %s", e)
 
 
+def filter_location_by_hierarchy(location_data, df_insee):
+    # Normaliser les inputs en listes
+    regions = location_data.get('region') or []
+    regions = regions if isinstance(regions, list) else [regions]
+    
+    departements = location_data.get('departement') or []
+    departements = departements if isinstance(departements, list) else [departements]
+    
+    post_codes = location_data.get('post_code') or []
+    post_codes = post_codes if isinstance(post_codes, list) else [post_codes]
+    
+    cities = location_data.get('city') or []
+    cities = cities if isinstance(cities, list) else [cities]
+
+    # --- HIERARCHY LOGIC ---
+    # Rule: If a child is inside a parent, drop the parent (keep the precision).
+    # If they are independent, keep both (unless your rule is to strictly keep only one level)
+
+    # 1. Check Cities vs Others
+    if cities:
+        df_cities = df_insee[df_insee['nom_commune_complet'].isin(cities)]
+        if not df_cities.empty:
+            # Get parents of these cities
+            c_depts = df_cities['code_departement'].unique().tolist()
+            c_regions = df_cities['nom_region'].unique().tolist()
+            c_cps = df_cities['code_postal'].unique().tolist()
+
+            # Remove parents if they contain these cities
+            departements = [d for d in departements if d not in c_depts]
+            regions = [r for r in regions if r not in c_regions]
+            post_codes = [cp for cp in post_codes if cp not in c_cps]
+
+    # 2. Check Postcodes vs Others
+    if post_codes:
+        df_cp = df_insee[df_insee['code_postal'].isin(post_codes)]
+        if not df_cp.empty:
+            cp_depts = df_cp['code_departement'].unique().tolist()
+            cp_regions = df_cp['nom_region'].unique().tolist()
+
+            departements = [d for d in departements if d not in cp_depts]
+            regions = [r for r in regions if r not in cp_regions]
+
+    # 3. Check Departements vs Regions
+    if departements and regions:
+        df_dept = df_insee[df_insee['code_departement'].isin(departements)]
+        if not df_dept.empty:
+            d_regions = df_dept['nom_region'].unique().tolist()
+            regions = [r for r in regions if r not in d_regions]
+
+    return {
+        'region': regions if regions else None,
+        'departement': departements if departements else None,
+        'post_code': post_codes if post_codes else None,
+        'city': cities if cities else None
+    }
 
 def get_db_connection():
     """Établit une connexion à la base de données MySQL"""
@@ -527,187 +619,125 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
 
 from typing import Dict, Any, List
 
-
 def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
     """
-    Construit la requête SQL et les paramètres à partir des critères de ciblage
-
-    Returns:
-        tuple: (query_string, parameters_list)
+    Builds the SQL query and parameters from targeting criteria.
     """
     where_clauses: List[str] = []
     params: List[Any] = []
 
     # ==============================
-    # Choix de la table selon headquarters
+    # 1. Table Choice (Headquarters)
     # ==============================
-
-    table = TABLE_ALL  # table par défaut
-
+    table = TABLE_ALL
     legal_criteria = criteria.get('legal_criteria', {})
-    if legal_criteria.get('present') and legal_criteria.get('headquarters') is not None:
-        if legal_criteria['headquarters'] is True:
-            table = TABLE_FAST
-        else:
-            table = TABLE_ALL
+    if legal_criteria.get('present') and legal_criteria.get('headquarters') is True:
+        table = TABLE_FAST
 
     # ==============================
-    # Traitement de la localisation
+    # 2. Location (Hierarchical + OR logic)
     # ==============================
     if criteria.get('location', {}).get('present'):
         loc = criteria['location']
+        filtered_loc = filter_location_by_hierarchy(loc, df_insee)
+        
+        loc_clauses = []
+        # Process each level; if data exists, add to the OR group
+        for key in ['city', 'post_code', 'departement', 'region']:
+            values = filtered_loc.get(key)
+            if values:
+                if not isinstance(values, list):
+                    values = [values]
+                
+                placeholders = ", ".join(["?"] * len(values))
+                field_name = FIELD_MAPPING[key]
+                loc_clauses.append(f"{field_name} IN ({placeholders})")
+                params.extend(values)
 
-        add_scalar_or_list_filter(
-            where_clauses,
-            params,
-            FIELD_MAPPING['post_code'],
-            loc.get('post_code')
-        )
-
-        add_scalar_or_list_filter(
-            where_clauses,
-            params,
-            FIELD_MAPPING['departement'],
-            loc.get('departement')
-        )
-
-        add_scalar_or_list_filter(
-            where_clauses,
-            params,
-            FIELD_MAPPING['region'],
-            loc.get('region')
-        )
-
-        add_scalar_or_list_filter(
-            where_clauses,
-            params,
-            FIELD_MAPPING['city'],
-            loc.get('city')
-        )
+        # Wrap all location filters in (OR) to avoid breaking other AND filters
+        if loc_clauses:
+            where_clauses.append(f"({' OR '.join(loc_clauses)})")
 
     # ==============================
-    # Traitement de l'activité
+    # 3. Activity
     # ==============================
     if criteria.get('activity', {}).get('present'):
         act = criteria['activity']
-
         if act.get('activity_codes_list'):
             codes = act['activity_codes_list']
             placeholders = ','.join(['?'] * len(codes))
-            where_clauses.append(
-                f"{FIELD_MAPPING['activity_codes_list']} IN ({placeholders})"
-            )
+            where_clauses.append(f"{FIELD_MAPPING['activity_codes_list']} IN ({placeholders})")
             params.extend(codes)
 
     # ==============================
-    # Traitement de la taille de l'entreprise
+    # 4. Company Size
     # ==============================
     if criteria.get('company_size', {}).get('present'):
         size = criteria['company_size']
         value = size.get('employees_number_range')
-
         if value:
             if isinstance(value, list):
                 placeholders = ",".join(["?"] * len(value))
-                where_clauses.append(
-                    f"{FIELD_MAPPING['employees_number_range']} IN ({placeholders})"
-                )
+                where_clauses.append(f"{FIELD_MAPPING['employees_number_range']} IN ({placeholders})")
                 params.extend(value)
             else:
-                where_clauses.append(
-                    f"{FIELD_MAPPING['employees_number_range']} = ?"
-                )
+                where_clauses.append(f"{FIELD_MAPPING['employees_number_range']} = ?")
                 params.append(value)
 
-   # ==============================
-    # Traitement des critères financiers
+    # ==============================
+    # 5. Financial Criteria
     # ==============================
     if criteria.get('financial_criteria', {}).get('present'):
         fin = criteria['financial_criteria']
-
-        # Turnover
-        if fin.get('turnover') is not None:
-            sup = fin.get('turnover_sup', True)   # default to True
-            inf = fin.get('turnover_inf', False)  # default to False
-            if sup:
-                where_clauses.append(f"{FIELD_MAPPING['turnover']} >= ?")
-                params.append(fin['turnover'])
-            if inf:
-                where_clauses.append(f"{FIELD_MAPPING['turnover']} <= ?")
-                params.append(fin['turnover'])
-
-        # Net Profit
-        if fin.get('net_profit') is not None:
-            sup = fin.get('net_profit_sup', True)
-            inf = fin.get('net_profit_inf', False)
-            if sup:
-                where_clauses.append(f"{FIELD_MAPPING['net_profit']} >= ?")
-                params.append(fin['net_profit'])
-            if inf:
-                where_clauses.append(f"{FIELD_MAPPING['net_profit']} <= ?")
-                params.append(fin['net_profit'])
-
-        # Profitability
-        if fin.get('profitability') is not None:
-            sup = fin.get('profitability_sup', True)
-            inf = fin.get('profitability_inf', False)
-            if sup:
-                where_clauses.append(f"{FIELD_MAPPING['profitability']} >= ?")
-                params.append(fin['profitability'])
-            if inf:
-                where_clauses.append(f"{FIELD_MAPPING['profitability']} <= ?")
-                params.append(fin['profitability'])
+        for field in ['turnover', 'net_profit', 'profitability']:
+            if fin.get(field) is not None:
+                if fin.get(f'{field}_sup', True):
+                    where_clauses.append(f"{FIELD_MAPPING[field]} >= ?")
+                    params.append(fin[field])
+                if fin.get(f'{field}_inf', False):
+                    where_clauses.append(f"{FIELD_MAPPING[field]} <= ?")
+                    params.append(fin[field])
 
     # ==============================
-    # Traitement des critères légaux
+    # 6. Legal Criteria
     # ==============================
     if legal_criteria.get('present'):
-        legal = legal_criteria
-
-        if legal.get('legal_category'):
+        if legal_criteria.get('legal_category'):
             where_clauses.append(f"{FIELD_MAPPING['legal_category']} = ?")
-            params.append(legal['legal_category'])
+            params.append(legal_criteria['legal_category'])
 
-        # ⚠️ headquarters volontairement ignoré ici
-        # car le choix de la table est déjà fait
+        # Creation Date
+        if legal_criteria.get('company_creation_date_threshold'):
+            d_field = FIELD_MAPPING['company_creation_date_threshold']
+            val = legal_criteria['company_creation_date_threshold']
+            if legal_criteria.get('company_creation_date_sup'):
+                where_clauses.append(f"{d_field} >= ?")
+                params.append(val)
+            if legal_criteria.get('company_creation_date_inf'):
+                where_clauses.append(f"{d_field} <= ?")
+                params.append(val)
 
-        if legal.get('company_creation_date_threshold'):
-            date_field = FIELD_MAPPING['company_creation_date_threshold']
+        # Capital
+        if legal_criteria.get('capital') is not None:
+            c_field = FIELD_MAPPING['capital']
+            val = legal_criteria['capital']
+            if legal_criteria.get('capital_threshold_sup'):
+                where_clauses.append(f"{c_field} >= ?")
+                params.append(val)
+            if legal_criteria.get('capital_threshold_inf'):
+                where_clauses.append(f"{c_field} <= ?")
+                params.append(val)
 
-            if legal.get('company_creation_date_sup'):
-                where_clauses.append(f"{date_field} >= ?")
-                params.append(legal['company_creation_date_threshold'])
-
-            if legal.get('company_creation_date_inf'):
-                where_clauses.append(f"{date_field} <= ?")
-                params.append(legal['company_creation_date_threshold'])
-
-        if legal.get('capital') is not None:
-            capital_field = FIELD_MAPPING['capital']
-
-            if legal.get('capital_threshold_sup'):
-                where_clauses.append(f"{capital_field} >= ?")
-                params.append(legal['capital'])
-
-            if legal.get('capital_threshold_inf'):
-                where_clauses.append(f"{capital_field} <= ?")
-                params.append(legal['capital'])
-
-        if legal.get('subsidiaries_number') is not None:
-            where_clauses.append(
-                f"{FIELD_MAPPING['subsidiaries_number']} >= ?"
-            )
-            params.append(legal['subsidiaries_number'])
+        if legal_criteria.get('subsidiaries_number') is not None:
+            where_clauses.append(f"{FIELD_MAPPING['subsidiaries_number']} >= ?")
+            params.append(legal_criteria['subsidiaries_number'])
 
     # ==============================
-    # Construction de la requête finale
+    # Final Query Assembly
     # ==============================
-    base_query = f"SELECT COUNT(*) AS count FROM {table}"
-
+    query = f"SELECT COUNT(*) AS count FROM {table}"
     if where_clauses:
-        query = base_query + " WHERE " + " AND ".join(where_clauses)
-    else:
-        query = base_query
+        query += " WHERE " + " AND ".join(where_clauses)
 
     return query, params
 
@@ -1237,6 +1267,7 @@ def count_companies_logic(criteria: dict):
         check_sql_params(query, params)
 
         debug_sql = format_sql_for_debug(query, params)
+        print(f"debug_sql:{debug_sql}")
         cursor.execute(debug_sql)
 
         result = cursor.fetchone()
@@ -1290,6 +1321,8 @@ def count_companies_logic(criteria: dict):
             insert_api_log(timestamp, criteria, duration, response)
         except Exception:
             pass
+
+
 
 
 @app.route('/count_bot_v1', methods=['POST'])

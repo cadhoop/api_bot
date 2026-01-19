@@ -314,31 +314,32 @@ test_cases = [
      {
         "name": "Test 18 - Critères complets",
         "criteria": {
-            "location": {"present": True, "departement": ["69", "75"]},
+            "location": {"present": True, "region": ["Occitanie"], "departement": ["92", "75"], "post_code":  ["92140"], "city": ["Clamart", "Toulouse"]},
+
             "activity": {
                 "present": True,
-                "activity_codes_list": ["9319Z"],
-                "original_activity_request": "e-sport"
+                "activity_codes_list": ["1071C"],
+                "original_activity_request": "boulangerie"
             },            
-            "company_size": {"present": True, "employees_number_range": ["20 to 49 employees", "50 to 99 employees"]},
+            "company_size": {"present": True, "employees_number_range": ["10 to 19 employees"]},
             "financial_criteria": {
               "present": True,
               
-              "turnover": 2000000,
+              "turnover": 20000,
               "turnover_sup": True,
               "turnover_inf": False,
               
-              "net_profit": 100000,
+              "net_profit": 5000,
               "net_profit_sup": True,
               "net_profit_inf": False,
               
-              "profitability": 0.05,
+              "profitability": 0.01,
               "profitability_sup": True,
               "profitability_inf": False
             },            
-            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 2}
+            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 1}
         },
-        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 15}, "count_semantic": {"op": ">", "value": 10}}
     },
 
 ]
