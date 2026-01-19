@@ -7,9 +7,14 @@ import argparse
 import hashlib
 import hmac
 import sys
+import operator
+from typing import List, Optional
 
 
 #  python3 API_bot_test.py --server="localhost"
+VERSION = "V1"
+VERSION = "V2"
+print(f"VERSION:{VERSION}")
 
 # Cas de test avec différentes combinaisons de critères
 test_cases = [
@@ -53,17 +58,29 @@ test_cases = [
     {
         "name": "Test 3 - Activités NAF multiples",
         "criteria": {
-            "location": {"present": False},
+            "location": {
+                "present": True,
+                "region": ["Bretagne", "Occitanie"],
+                "departement": None,
+                "post_code": None,
+                "city": None
+            },            
             "activity": {
                 "present": True,
                 "activity_codes_list": ["6201Z", "6202A", "6203Z"],
-                "original_activity_request": "Services informatiques"
+                "original_activity_request": "farines elle"
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
-            "legal_criteria": {"present": True, "headquarters": True}
-        },
-        "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_category": "Société commerciale",
+                "company_creation_date_threshold": "2015-01-01",
+                "company_creation_date_sup": True,
+                "company_creation_date_inf": False
+            }        },
+        "expected": {"count_legal": {"op": ">", "value": 5000}, "count_semantic": {"op": "<=", "value": 70}}
     },
 
     {
@@ -208,8 +225,121 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": False}
         },
+        "expected": {"count_legal": {"op": ">", "value": 100000}, "count_semantic": {"op": "<=", "value": 2000}}
+    },
+      {
+        "name": "Test 15 - Activités NAF multiples avec stop xwords et lemmatisation",
+        "criteria": {
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": None,
+                "post_code": None,
+                "city": None
+            },            
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["6201Z", "6202A", "6203Z"],
+                "original_activity_request": "farines de ble"
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_category": "Société commerciale",
+                "company_creation_date_threshold": None,
+                "company_creation_date_sup": None,
+                "company_creation_date_inf": None,
+            }        },
+        "expected": {"count_legal": {"op": ">", "value": 5000}, "count_semantic": {"op": "<=", "value": 70}}
+    },
+
+    {
+        "name": "Test 16 - Activités NAF multiples avec apostrophe",
+        "criteria": {
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": None,
+                "post_code": None,
+                "city": None
+            },            
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["6619B", " 6619B"],
+                "original_activity_request": "banque d'investissements"
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_category": "Société commerciale",
+                "company_creation_date_threshold": None,
+                "company_creation_date_sup": None,
+                "company_creation_date_inf": None,
+            }        },
+        "expected": {"count_legal": {"op": ">", "value": 8000}, "count_semantic": {"op": "<=", "value": 5000}}
+    },
+
+    {
+        "name": "Test 17 - Activités NAF multiples avec apostrophe",
+        "criteria": {
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": None,
+                "post_code": None,
+                "city": None
+            },            
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "e-sport"
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_category": "Société commerciale",
+                "company_creation_date_threshold": None,
+                "company_creation_date_sup": None,
+                "company_creation_date_inf": None,
+            }        },
+        "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 40}}
+    },
+
+     {
+        "name": "Test 18 - Critères complets",
+        "criteria": {
+            "location": {"present": True, "departement": ["69", "75"]},
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "e-sport"
+            },            
+            "company_size": {"present": True, "employees_number_range": ["20 to 49 employees", "50 to 99 employees"]},
+            "financial_criteria": {
+              "present": True,
+              
+              "turnover": 2000000,
+              "turnover_sup": True,
+              "turnover_inf": False,
+              
+              "net_profit": 100000,
+              "net_profit_sup": True,
+              "net_profit_inf": False,
+              
+              "profitability": 0.05,
+              "profitability_sup": True,
+              "profitability_inf": False
+            },            
+            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 2}
+        },
         "expected": {"count_legal": {"op": ">", "value": 0}, "count_semantic": {"op": "<=", "value": 2000}}
-    }
+    },
 
 ]
 
@@ -230,61 +360,110 @@ def compare(actual, operator, expected):
         return actual <= expected
     raise ValueError(f"Unsupported operator: {operator}")
 
+if VERSION == "V1":
+    #API_KEYS = json.loads(os.getenv("API_KEYS_V2"))
+    print(os.getenv("API_KEYS"))
+    #sys.exit();
+    API_KEYS = json.loads(os.getenv("API_KEYS")) 
 
-API_KEYS = json.loads(os.getenv("API_KEYS"))
-# Get API key from environment variable
-if not API_KEYS:
-    raise ValueError("API_KEYS environment variable not set!")
+    # Get API key from environment variable
+    if not API_KEYS:
+        raise ValueError("API_KEYS environment variable not set!")
+
+elif VERSION == "V2":
+    print(os.getenv("API_KEYS_V2"))
+    #sys.exit();
+    API_KEYS = json.loads(os.getenv("API_KEYS_V2")) 
+
+    # Get API key from environment variable
+    if not API_KEYS:
+        raise ValueError("API_KEYS environment variable not set!")
 
 
-def get_server_from_argv(default="localhost"):
-    for arg in sys.argv[1:]:
-        if arg.startswith("--server="):
-            return arg.split("=", 1)[1]
-    return default
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run API bot tests")
+    parser.add_argument('--server', required=True, help='Server address')
+    parser.add_argument('test_numbers', nargs='?', help='Test numbers to replay, e.g., 1-5-12')
+    return parser.parse_args()
+
+args = parse_args()
+
+# Convert test_numbers to list of integers
+test_numbers = None  # None = run all tests
+
+print(args.test_numbers.lower())
+if args.test_numbers:
+    if args.test_numbers.lower() == "all":
+        test_numbers = None
+    else:
+        try:
+            test_numbers = [int(x) for x in args.test_numbers.split('-')]
+        except ValueError:
+            print('Invalid format. Use "all", a number, or numbers separated by "-" (e.g. 1-5-12)')
+            exit(1)
+# Use the arguments
+server = args.server
+print("Server:", server)
+print("Test numbers to replay:", test_numbers)
 
 
 def test_api(test_case):
+
     """
     Test the API with a specific test case including API key authentication
     """
    
-    server      = get_server_from_argv()
-    base_url    = f"http://{server}:5001"
 
     # Load API keys + secrets from env variable
 
 
-    API_KEYS    = json.loads(os.getenv("API_KEYS", "{}"))
     # print("API_KEYS")
     # print(API_KEYS)
     # Choose the client you want to use
-    api_key = list(API_KEYS.keys())[0]       # take the first key (or pick specific)
-    secret = API_KEYS[api_key]
+    #secret = API_KEYS[api_key]
+
 
     # Timestamp
     timestamp = str(int(time.time()))
 
-    # HMAC signature
-    signature = hmac.new(
-        secret.encode(),
-        f"{api_key}{timestamp}".encode(),
-        hashlib.sha256
-    ).hexdigest()
+    if VERSION == "V1":
 
-    # Send request
-    headers = {
-        "X-Api-Key": api_key,
-        "X-Timestamp": timestamp,
-        "X-Signature": signature
-    }
+        API_KEYS    = json.loads(os.getenv("API_KEYS", "{}"))
+        api_key = list(API_KEYS.keys())[0]       # take the first key (or pick specific)
 
+        headers = {
+            "X-Api-Key": api_key
+        }
+
+    elif VERSION == "V2":
+        API_KEYS = json.loads(os.getenv("API_KEYS_V2", "{}"))
+
+        # Pick the first API key in the dictionary
+        api_key = list(API_KEYS.keys())[0]  # e.g., "3fa036..."
+        secret = API_KEYS[api_key]          # Corresponding secret
+
+        # Timestamp
+        timestamp = str(int(time.time()))
+
+        # HMAC signature
+        signature = hmac.new(
+            secret.encode(),
+            f"{api_key}{timestamp}".encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Send request
+        headers = {
+            "X-Api-Key": api_key,
+            "X-Timestamp": timestamp,
+            "X-Signature": signature
+        }
     try:
         response = requests.post(
             API_URL,
             json=test_case["criteria"],
             headers=headers,
-            timeout=30
+            timeout=60
         )
         return {
             "test_name": test_case["name"],
@@ -313,10 +492,9 @@ def test_api(test_case):
         }
 
 
-
-def run_all_tests(test_number: int = None):
+def run_all_tests(test_numbers: Optional[List[int]] = None):
     """
-    Execute all API tests (or a specific test) with API key authentication
+    Execute all API tests or a subset of tests
     """
     print("=" * 80)
     print("TESTS API - COMPANY TARGETING")
@@ -327,18 +505,22 @@ def run_all_tests(test_number: int = None):
 
     results = []
     success_count = 0
+    tab_errors = []
 
     # Determine which tests to run
-    if test_number is not None:
-        if 1 <= test_number <= len(test_cases):
-            tests_to_run = [(test_number, test_cases[test_number-1])]
-        else:
-            print(f"Erreur: test_number {test_number} hors limites (1-{len(test_cases)})")
-            return []
+    if test_numbers:
+        tests_to_run = []
+        for n in test_numbers:
+            if 1 <= n <= len(test_cases):
+                tests_to_run.append((n, test_cases[n - 1]))
+            else:
+                print(f"Erreur: test_number {n} hors limites (1-{len(test_cases)})")
     else:
         tests_to_run = list(enumerate(test_cases, 1))  # all tests
+
+    # Run tests
     for i, test_case in tests_to_run:
-        print(f"Exécution du test {i}/{len(test_cases)}: {test_case['name']}")
+        print(f"Running test {i}: {test_case.get('name')}")
 
         start_time = time.perf_counter()
         result = test_api(test_case)
@@ -353,21 +535,45 @@ def run_all_tests(test_number: int = None):
         count_legal = response.get('count_legal')
         count_semantic = response.get('count_semantic')
 
+      # Mapping string operators to Python functions
+        OPS = {
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+            "==": operator.eq,
+            "!=": operator.ne
+        }
+
+        # Extract expected values
         expected = test_case.get('expected', {})
-        exp_legal = expected.get('company_number_legal')
-        exp_semantic = expected.get('company_number_semantic')
+        exp_legal = expected.get('count_legal', {})
+        exp_semantic = expected.get('count_semantic', {})
+
+        exp_op_legal = exp_legal.get('op')
+        exp_value_legal = exp_legal.get('value')
+
+        exp_op_semantic = exp_semantic.get('op')
+        exp_value_semantic = exp_semantic.get('value')
 
         # ---------- BUSINESS VALIDATION ----------
         business_ok = True
-        errors = []
 
-        if exp_legal is not None and count_legal != exp_legal:
-            business_ok = False
-            errors.append(f"count_legal expected {exp_legal}, got {count_legal}")
+        print(f"exp_legal: {exp_legal}")
+        print(f"count_legal: {count_legal}")
 
-        if exp_semantic is not None and count_semantic != exp_semantic:
-            business_ok = False
-            errors.append(f"count_semantic expected {exp_semantic}, got {count_semantic}")
+        # Use the operator dynamically
+        if exp_op_legal and exp_value_legal is not None:
+            if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
+                business_ok = False
+                tab_errors.append(f"test_number:{test_case}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
+                tab_errors.append(test_case)
+
+        if exp_op_semantic and exp_value_semantic is not None:
+            if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
+                business_ok = False
+                tab_errors.append(f"test_number:{test_case}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
+                tab_errors.append(test_case)
 
         success = success_http and business_ok
         status = "✓ SUCCÈS" if success else "✗ ÉCHEC"
@@ -379,9 +585,9 @@ def run_all_tests(test_number: int = None):
             f"(Durée: {duration:.3f}s)"
         )
 
-        if errors:
+        if tab_errors:
             print("  ❌ Validation errors:")
-            for err in errors:
+            for err in tab_errors:
                 print(f"    - {err}")
 
             # ---------- Print individual counts for KO tests ----------
@@ -428,7 +634,7 @@ def run_all_tests(test_number: int = None):
         }, f, indent=2, ensure_ascii=False)
 
     #print(f"Résultats détaillés sauvegardés dans: {output_file}")
-    return results
+    return results, tab_errors
 
 
 
@@ -483,13 +689,11 @@ def display_detailed_result(result):
     print("\nSTATUT:", status)
     print("=" * 80)
 
-
 def main():
 
-    API_KEYS = os.getenv("API_KEYS")
-    #print(f"API_KEYS:{API_KEYS}:")
-    if not API_KEYS:
-        raise ValueError("API_KEYS environment variable not set!")
+    # API_KEYS = os.getenv("API_KEYS")
+    # if not API_KEYS:
+    #     raise ValueError("API_KEYS environment variable not set!")
 
     parser = argparse.ArgumentParser(description="Run API tests or integration")
     parser.add_argument(
@@ -498,25 +702,52 @@ def main():
         required=True,
         help="IP or hostname of the server where the API is running"
     )
+    parser.add_argument(
+        'test_numbers',
+        nargs='?',
+        help='Test numbers to replay, e.g., 3 or 1-5-12'
+    )
+
     args = parser.parse_args()
     server_ip = args.server
 
+    # # Convert test_numbers to list of integers
+    # test_numbers = []
+    # if args.test_numbers:
+    #     try:
+    #         test_numbers = [int(x) for x in args.test_numbers.split('-')]
+    #     except ValueError:
+    #         print("Invalid format. Use numbers separated by '-' e.g., 1-5-12")
+    #         exit(1)
+
     # Example: construct API URL dynamically
     global API_URL
-    API_URL = f"http://{server_ip}:5002/count_bot_v2"
+    if VERSION == "V2":
+        API_URL = f"http://{server_ip}:5001/count_bot_v2"
+    elif VERSION == "V1":
+        API_URL = f"http://{server_ip}:5001/count_bot_v1"
 
-    #print(f"Using API URL: {API_URL}")
+    print(f"Using API URL: {API_URL}")
+    print(f"Test numbers to replay: {test_numbers}")
 
-      # Run only test number 3
-    #results = run_all_tests(test_number=9)
-    results = run_all_tests()
+    # Run tests (pass test_numbers to filter if needed)
+    results, errors = run_all_tests(test_numbers=test_numbers)
 
-    # Display a detailed result
-    # for idx, result in enumerate(results, 1):
-    #     print(f"\n\n=== Détail du test {idx} ===")
-    #     display_detailed_result(result)
-    
     print("\n✓ Tests terminés!")
+
+    # Display errors in pairs
+    for i in range(0, len(errors), 2):
+        error_msg = errors[i]
+        test_case = errors[i+1]
+        
+        print("------ ERROR ------")
+        print(error_msg)
+        print("------ TEST CASE ------")
+        print(f"Name: {test_case.get('name')}")
+        print(f"Criteria: {test_case.get('criteria')}")
+        print(f"Expected: {test_case.get('expected')}")
+        print("\n")
+        
 
 if __name__ == "__main__":
     main()

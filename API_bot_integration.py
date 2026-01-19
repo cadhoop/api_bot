@@ -14,9 +14,101 @@ import json
 import copy
 from functools import wraps
 import socket
-import hmac
+import unicodedata
 import hashlib
+import hmac
 
+
+# -- 1️⃣ Drop the table if it already exists
+# mysql> DROP TABLE IF EXISTS `sirene1225saasv9_bot`;
+# Query OK, 0 rows affected (0,08 sec)
+
+# mysql> 
+# mysql> -- 2️⃣ Create the table
+# mysql> CREATE TABLE `sirene1225saasv9_bot` (
+#     ->   `siren` bigint NOT NULL,
+#     ->   `Commune` varchar(255) DEFAULT NULL,
+#     ->   `Code_postal` int DEFAULT NULL,
+#     ->   `Departement` smallint DEFAULT NULL,
+#     ->   `Region` varchar(100) DEFAULT NULL,
+#     ->   `Activite_entreprise` varchar(200) DEFAULT NULL,
+#     ->   `Tranche_effectif_entreprise` varchar(50) DEFAULT NULL,
+#     ->   `Date_creation_entreprise` date DEFAULT NULL,
+#     ->   `Capital` bigint DEFAULT NULL,
+#     ->   `Nombre_etablissements` int DEFAULT NULL,
+#     ->   `Categorie_juridique` varchar(255) DEFAULT NULL,
+#     ->   `CA_le_plus_recent` bigint DEFAULT NULL,
+#     ->   `Resultat_net_le_plus_recent` bigint DEFAULT NULL,
+#     ->   `Rentabilite_la_plus_recente` decimal(10,4) DEFAULT NULL,
+#     ->   `Nom_entreprise_lemmatise` varchar(150) DEFAULT NULL,
+#     ->   `Nom_enseigne` varchar(120) DEFAULT NULL,
+#     ->   PRIMARY KEY (`siren`),
+#     ->   KEY `idx_commune` (`Commune`),
+#     ->   KEY `idx_departement` (`Departement`),
+#     ->   KEY `idx_region` (`Region`),
+#     ->   KEY `idx_code_postal` (`Code_postal`),
+#     ->   KEY `idx_activite_entreprise` (`Activite_entreprise`),
+#     ->   KEY `idx_tranche_effectif` (`Tranche_effectif_entreprise`),
+#     ->   KEY `idx_date_creation` (`Date_creation_entreprise`),
+#     ->   KEY `idx_capital` (`Capital`),
+#     ->   KEY `idx_nombre_etablissements` (`Nombre_etablissements`),
+#     ->   KEY `idx_categorie_juridique` (`Categorie_juridique`),
+#     ->   KEY `idx_ca_recent` (`CA_le_plus_recent`),
+#     ->   KEY `idx_rentabilite` (`Rentabilite_la_plus_recente`)
+#     -> ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+# Query OK, 0 rows affected (0,38 sec)
+
+# mysql> 
+# mysql> -- 3️⃣ Insert data from sirene1225saasv9 where Siege_entreprise = '1'
+# mysql> INSERT INTO sirene1225saasv9_bot (
+#     ->     siren,
+#     ->     Commune,
+#     ->     Code_postal,
+#     ->     Departement,
+#     ->     Region,
+#     ->     Activite_entreprise,
+#     ->     Tranche_effectif_entreprise,
+#     ->     Date_creation_entreprise,
+#     ->     Capital,
+#     ->     Nombre_etablissements,
+#     ->     Categorie_juridique,
+#     ->     CA_le_plus_recent,
+#     ->     Resultat_net_le_plus_recent,
+#     ->     Rentabilite_la_plus_recente,
+#     ->     Nom_entreprise_lemmatise,
+#     ->     Nom_enseigne
+#     -> )
+#     -> SELECT
+#     ->     s.Siren,
+#     ->     s.Commune,
+#     ->     s.Code_postal,
+#     ->     s.Departement,
+#     ->     s.Region,
+#     ->     s.Activite_entreprise,
+#     ->     s.Tranche_effectif_entreprise,
+#     ->     s.Date_creation_entreprise,
+#     ->     s.Capital,
+#     ->     s.Nombre_etablissements,
+#     ->     s.Categorie_juridique,
+#     ->     s.CA_le_plus_recent,
+#     ->     s.Resultat_net_le_plus_recent,
+#     ->     s.Rentabilite_la_plus_recente,
+#     ->     s.Nom_entreprise_lemmatise,
+#     ->     s.Nom_enseigne
+#     -> FROM sirene1225saasv9 s
+#     -> WHERE s.Siege_entreprise = '1';
+# Query OK, 0 rows affected (0,00 sec)
+# Records: 0  Duplicates: 0  Warnings: 0
+
+# mysql> INSERT INTO sirene1225saasv9_bot (     siren,     Commune,     Code_postal,     Departement,     Region,     Activite_entreprise,     Tranche_effectif_entreprise,     Date_creation_entreprise,     Capital,     Nombre_etablissements,
+#     Categorie_juridique,     CA_le_plus_recent,     Resultat_net_le_plus_recent,     Rentabilite_la_plus_recente,     Nom_entreprise_lemmatise,     Nom_enseigne ) SELECT     s.Siren,     s.Commune,     s.Code_postal,     s.Departement,
+# s.Region,     s.Activite_entreprise,     s.Tranche_effectif_entreprise,     s.Date_creation_entreprise,     s.Capital,     s.Nombre_etablissements,     s.Categorie_juridique,     s.CA_le_plus_recent,     s.Resultat_net_le_plus_recent,     s.Rentabilite_la_plus_recente,     s.Nom_entreprise_lemmatise,     s.Nom_enseigne FROM sirene1225saasv9 s WHERE s.Siege_entreprise = 'oui';
+# Query OK, 13065137 rows affected (2 hours 22 min 52,25 sec)
+# Records: 13065137  Duplicates: 0  Warnings: 0
+
+# ALTER TABLE `sirene1225saasv9_bot`
+#     -> ADD FULLTEXT KEY `ft_nom_entreprise_enseigne` (`Nom_entreprise_lemmatise`, `Nom_enseigne`);
+# Query OK, 0 rows affected, 1 warning (27 min 11,86 sec)
 
 
 # CREATE TABLE LogAPI_bot (
@@ -40,8 +132,6 @@ import hashlib
 # log.setLevel(logging.WARNING)
 
 # logger = logging.getLogger(__name__)
-
-
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)  # keep DEBUG for file logging
@@ -70,9 +160,43 @@ werkzeug_logger.setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+# Load API_KEYS from env defense code
+try:
+    raw = os.getenv("API_KEYS", "{}")
 
-AUTH_WINDOW_SECONDS = 300  # 5 minutes
-SECRET              = os.getenv("SECRET", "").split(",")
+    API_KEYS = json.loads(raw)
+    flag_error_key_V1 = False
+
+except json.JSONDecodeError:
+    flag_error_key_V1 = True
+    raise RuntimeError("API_KEYS environment variable must be valid JSON")
+
+try:
+    raw = os.getenv("API_KEYS_V2", "{}")
+    API_KEYS = json.loads(raw)
+    flag_error_key_V2 = False
+
+except json.JSONDecodeError:
+    flag_error_key_V2 = True
+    raise RuntimeError("API_KEYS environment variable must be valid JSON")
+
+if (flag_error_key_V2 or flag_error_key_V1):
+    print("error lecture des clefs")
+    sys.exit();
+else:
+    print("Chargement OK des clefs d'authentification")
+
+# Defensive fix: unwrap list if accidentally wrapped
+if isinstance(API_KEYS, list) and len(API_KEYS) == 1 and isinstance(API_KEYS[0], str):
+    try:
+        API_KEYS = json.loads(API_KEYS[0])
+    except json.JSONDecodeError:
+        raise RuntimeError("API_KEYS list contains invalid JSON")
+
+if not isinstance(API_KEYS, dict):
+    raise RuntimeError("API_KEYS must be a JSON object (dict)")
+#print(f"API_KEYS:{API_KEYS}:")
+
 
 
 app = Flask(__name__)
@@ -98,53 +222,6 @@ DB_CONFIG_ikoula3 = {
     'use_unicode': True
 }
 
-LEGAL_FORM_MAPPING = {
-  "legal_forms": [
-    {
-      "code": "1000",
-      "label": "Entrepreneur individuel"
-    },
-    {
-      "code": "2",
-      "label": "Personne morale de droit privé non dotée de la personnalité morale"
-    },
-    {
-      "code": "3",
-      "label": "Personne morale de droit étranger"
-    },
-    {
-      "code": "4",
-      "label": "Personne morale de droit public soumise au droit commercial"
-    },
-    {
-      "code": "5",
-      "label": "Société commerciale"
-    },
-    {
-      "code": "6",
-      "label": "Autre personne morale immatriculée au RCS"
-    },
-    {
-      "code": "7",
-      "label": "Personne morale et organisme soumis au droit administratif"
-    },
-    {
-      "code": "8",
-      "label": "Organisme privé spécialisé"
-    },
-    {
-      "code": "9",
-      "label": "Groupement de droit privé"
-    }
-  ]
-}
-
-LEGAL_FORM_CODE_TO_LABEL = {
-    item["code"]: item["label"]
-    for item in LEGAL_FORM_MAPPING["legal_forms"]
-}
-
-
 hostname = socket.gethostname()
 if hostname == "frhb96148ds":
     DB_CONFIG = DB_CONFIG_ikoula3
@@ -164,16 +241,168 @@ FIELD_MAPPING = {
     "turnover": "CA_le_plus_recent",
     "net_profit": "Resultat_net_le_plus_recent",
     "profitability": "Rentabilite_la_plus_recente",
-    "legal_form": "Categorie_juridique",
+    "legal_category": "Categorie_juridique",
     "headquarters": "Siege_entreprise",
     "company_creation_date_threshold": "Date_creation_entreprise",
     "capital": "Capital",
     "subsidiaries_number": "Nombre_etablissements"
 }
 
-MOIS_ANNEE = "1225"
-TABLE_FAST = f"sirene{MOIS_ANNEE}saasv9_bot"
-TABLE_ALL  = f"sirene{MOIS_ANNEE}saasv9"
+TAB_STOPWORDS = [
+    "a",
+    "à",
+    "alors",
+    "au",
+    "aucun",
+    "aucuns",
+    "aussi",
+    "autre",
+    "aux",
+    "avant",
+    "avec",
+ #"avoir",
+ #"bien",
+   # "bon",
+    "ça",
+    "car",
+    "ce",
+    "cela",
+    "ces",
+    "cette",
+    "ceux",
+    "chaque",
+    "ci",
+    "comme",
+    "comment",
+    #"copyright",
+    "dans",
+    "de",
+    "début",
+    "dedans",
+    "dehors",
+    "depuis",
+    "des",
+    "devrait",
+    #"dimanche",
+    "doit",
+    "donc",
+    #"dos",
+    "du",
+    "elle",
+    "elles",
+    "en",
+    "encore",
+    "est",
+    "et",
+    "et/ou",
+    "étaient",
+    #"état",
+    "été",
+    "etes",
+    "étions",
+    #"etre",
+    #"être",
+    "eu",
+    #"faire",
+    "fait",
+    "faites",
+    #"fois",
+    "font",
+    #"hors",
+    "ici",
+    "il",
+    "ils",
+    "je",
+    #"jeudi",
+    #"jour",
+    "juste",
+    "la",
+    "là",
+    "le",
+    "les",
+    "leur",
+    #"lundi",
+    "ma",
+    #"maintenant",
+    "mais",
+    #"mardi",
+    "même",
+    #"mercredi",
+    "mes",
+    "mettre",
+    #"moins",
+    "mon",
+    #"mot",
+    "ni",
+    "nommés",
+    "non",
+    "nos",
+    "notre",
+    "nous",
+    "ou",
+    "où",
+    "par",
+    "parce",
+    "pas",
+    "peu",
+    "peut",
+    "plupart",
+    "plus",
+    "pour",
+    "pourquoi",
+    "quand",
+    "que",
+    "quel",
+    "quelle",
+    "quelles",
+    "quels",
+    "qui",
+    "sa",
+    #"samedi",
+    "sans",
+    "se",
+    "ses",
+    "seulement",
+    "si",
+    "sien",
+    "son",
+    "sont",
+    "sous",
+    "soyez",
+    #"suite",
+    "sur",
+    "ta",
+    "tandis",
+    "tellement",
+    "tels",
+    "tes",
+    "ton",
+    "toujours",
+    "tous",
+    "tout",
+    "toute",
+    "très",
+    "trop",
+    "tu",
+    "un",
+    "une",
+    #"vendredi",
+    "voient",
+    "vont",
+    "vos",
+    "votre",
+    "vous",
+    "vu",
+]
+
+MOIS_ANNEE  = "1225"
+TABLE_FAST  = f"sirene{MOIS_ANNEE}saasv9_bot"
+TABLE_ALL   = f"sirene{MOIS_ANNEE}saasv9"
+TABLE_AFNIC = f"Afnic_Light{MOIS_ANNEE}_full"
+
+MIN_FULLTEXT_LENGTH = 3
+
+
 
 def insert_api_log(timestamp, request_json, duration, response_json):
     """
@@ -208,6 +437,33 @@ def get_db_connection():
     except Error as e:
         print(f"Erreur de connexion à MySQL: {e}")
         raise
+
+
+
+def strip_activite_condition(sql: str) -> str:
+    """
+    Remove 'Activite_entreprise IN (...)' from a SQL query
+    whether it appears after WHERE or after AND.
+    """
+
+    # Case 1: WHERE Activite_entreprise IN (...) AND
+    sql = re.sub(
+        r"WHERE\s+Activite_entreprise\s+IN\s*\([^)]*\)\s+AND\s+",
+        "WHERE ",
+        sql,
+        flags=re.IGNORECASE
+    )
+
+    # Case 2: AND Activite_entreprise IN (...)
+    sql = re.sub(
+        r"\s+AND\s+Activite_entreprise\s+IN\s*\([^)]*\)",
+        "",
+        sql,
+        flags=re.IGNORECASE
+    )
+    #print(f"retour sql stripped:{sql}")
+    return sql
+
 
 def format_sql_for_debug(query: str, params: List[Any]) -> str:
     """
@@ -271,14 +527,6 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
 
 from typing import Dict, Any, List
 
-
-def convert_legal_form_code_to_label(code: str) -> str | None:
-    """
-    Convertit un code legal_form (API) en libellé stocké en base MySQL
-    """
-    if code is None:
-        return None
-    return LEGAL_FORM_CODE_TO_LABEL.get(str(code))
 
 def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
     """
@@ -371,49 +619,54 @@ def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
                 )
                 params.append(value)
 
-    # ==============================
+   # ==============================
     # Traitement des critères financiers
     # ==============================
     if criteria.get('financial_criteria', {}).get('present'):
         fin = criteria['financial_criteria']
 
+        # Turnover
         if fin.get('turnover') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['turnover']} >= ?")
-            params.append(fin['turnover'])
+            sup = fin.get('turnover_sup', True)   # default to True
+            inf = fin.get('turnover_inf', False)  # default to False
+            if sup:
+                where_clauses.append(f"{FIELD_MAPPING['turnover']} >= ?")
+                params.append(fin['turnover'])
+            if inf:
+                where_clauses.append(f"{FIELD_MAPPING['turnover']} <= ?")
+                params.append(fin['turnover'])
 
+        # Net Profit
         if fin.get('net_profit') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['net_profit']} >= ?")
-            params.append(fin['net_profit'])
+            sup = fin.get('net_profit_sup', True)
+            inf = fin.get('net_profit_inf', False)
+            if sup:
+                where_clauses.append(f"{FIELD_MAPPING['net_profit']} >= ?")
+                params.append(fin['net_profit'])
+            if inf:
+                where_clauses.append(f"{FIELD_MAPPING['net_profit']} <= ?")
+                params.append(fin['net_profit'])
 
+        # Profitability
         if fin.get('profitability') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['profitability']} >= ?")
-            params.append(fin['profitability'])
+            sup = fin.get('profitability_sup', True)
+            inf = fin.get('profitability_inf', False)
+            if sup:
+                where_clauses.append(f"{FIELD_MAPPING['profitability']} >= ?")
+                params.append(fin['profitability'])
+            if inf:
+                where_clauses.append(f"{FIELD_MAPPING['profitability']} <= ?")
+                params.append(fin['profitability'])
 
     # ==============================
     # Traitement des critères légaux
     # ==============================
     if legal_criteria.get('present'):
-
         legal = legal_criteria
 
-
-        if legal.get('legal_form'):
-            values = legal['legal_form']
-            if not isinstance(values, list):
-                values = [values]
-
-            labels = [
-                convert_legal_form_code_to_label(v)
-                for v in values
-                    if convert_legal_form_code_to_label(v)
-            ]
-
-            if labels:
-                placeholders = ",".join(["?"] * len(labels))
-                where_clauses.append(
-                    f"{FIELD_MAPPING['legal_form']} IN ({placeholders})"
-                )
-                params.extend(labels)
+        if legal.get('legal_category'):
+            where_clauses.append(f"{FIELD_MAPPING['legal_category']} = ?")
+            params.append(legal['legal_category'])
 
         # ⚠️ headquarters volontairement ignoré ici
         # car le choix de la table est déjà fait
@@ -502,6 +755,8 @@ def convert_employees_range_to_salaries(criteria: dict) -> dict:
     def convert(text: str) -> str:
         text = re.sub(r'\bto\b', 'a', text, flags=re.IGNORECASE)
         text = re.sub(r'\bemployees\b', 'salaries', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bemployee\b', 'salarie', text, flags=re.IGNORECASE)
+
         return text
 
     # ✅ Case 1: list of ranges
@@ -565,8 +820,310 @@ def test_criteria_mismatches(criteria: Dict) -> List[str]:
 
 
 
-def count_semantic(original_request):
-    return 2000
+def lemmatize_expression(expression: str, conn) -> str:
+    cursor = conn.cursor(dictionary=True)
+
+    """
+    Lemmatize each word in the expression using the DicoFrance table.
+    Returns the lemmatized expression as a string.
+    """
+    if not expression:
+        return ""
+
+    # Split words by space
+    words = expression.split()
+
+    # Lowercase for consistency
+    words_lower = [w.lower() for w in words]
+
+    # Batch query to fetch lemmas
+    format_strings = ",".join(["%s"] * len(words_lower))
+    sql = f"SELECT entree, lemme FROM DicoFrance WHERE entree IN ({format_strings})"
+    cursor.execute(sql, tuple(words_lower))
+    results = cursor.fetchall()
+
+    # Map: word -> lemma
+    lemma_map = {r['entree']: r['lemme'] for r in results if r['lemme']}
+
+    # Replace words with lemma if found
+    lemmatized_words = [lemma_map.get(w, w) for w in words_lower]
+
+    # Join back into a string
+    return " ".join(lemmatized_words)
+
+def remove_stop_words_french(texte, supprime_accent, verbose=False):
+    """
+    Remove French stop words and words shorter than MIN_FULLTEXT_LENGTH.
+    """
+    if texte is None:
+        return "#"
+
+    words = texte.split()
+    result = []
+
+    for w in words:
+        original_w = w
+        if supprime_accent:
+            w, _ = removeaccent(w, verbose)
+        w_lower = w.lower()
+
+        # Skip stopwords and short words
+        if w_lower not in TAB_STOPWORDS and len(w_lower) >= MIN_FULLTEXT_LENGTH:
+            result.append(original_w)
+        else:
+            if verbose:
+                print(f"Skipped: {w_lower}")
+
+    return " ".join(result)
+
+
+
+FRENCH_ELISIONS = r"\b(?:d|l|j|c|qu|n|s|t|m|jusqu|lorsqu|puisqu)'"
+
+def normalize_french_text(text: str) -> tuple[str, str]:
+    if not text:
+        return "", ""
+
+    # Lowercase
+    text = text.lower()
+
+    # Normalize accents (é → e)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+    # Remove French elisions: d', l', qu', etc.
+    text = re.sub(FRENCH_ELISIONS, "", text)
+
+    # Remove remaining apostrophes
+    text = re.sub(r"[’'`]", " ", text)
+
+    # Keep dash (hyphen)
+    text = re.sub(r"[^a-z0-9\s\-]", " ", text)
+
+    # Normalize multiple dashes
+    text = re.sub(r"-{2,}", "-", text)
+
+    # Normalize spaces around dashes
+    text = re.sub(r"\s*-\s*", "-", text)
+
+    # Collapse spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Variant 1: keep dash (for LIKE / exact)
+    text_with_dash = text
+
+    # Variant 2: remove dash (for FULLTEXT)
+    text_without_dash = text.replace("-", " ")
+
+    return text_with_dash, text_without_dash
+
+def removeaccent(word, verbose=False):
+    normalized = unicodedata.normalize("NFD", word)
+    no_accent = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+    if verbose:
+        print(f"{word} -> {no_accent}")
+    return no_accent, word
+
+
+
+def count_semantic(original_request, debug_sql, conn):
+    # print(f"original_request:{original_request}")
+    # print(f"debug_sql debut fct count_semantic:{debug_sql}")
+    idx = debug_sql.upper().rfind("WHERE")
+    if idx == -1:
+        return None
+    else: 
+        where_cmd_with_and = "AND " + debug_sql[idx + len("WHERE"):].strip()
+        where_cmd_without_and = debug_sql[idx + len("WHERE"):].strip()
+
+    #print(f"where_cmd_with_and:{where_cmd_with_and}")
+    # ---- 1️⃣ Your lemmatization function ----
+    def lemmatize(text: str) -> str:
+        # Replace with your actual lemmatization
+        return text.lower()
+
+
+    # ---- 3️⃣ Lemmatize the expression ----
+    # print(f"original_request:{original_request}")
+    # print("normalisze")
+    # print(normalize_french_text(original_request), True, False)
+    original_request_normalized_with_dash,original_request_normalized_without_dash = normalize_french_text(original_request)
+
+    if "-" in original_request:
+        expr_lem_with_dash      = lemmatize_expression( remove_stop_words_french(original_request_normalized_with_dash, True, False), conn)  # e.g., "directeur immobilier"
+        expr_lem_without_dash   = lemmatize_expression( remove_stop_words_french(original_request_normalized_without_dash, True, False), conn)  # e.g., "directeur immobilier"
+        # print(f"expr_lem_with_dash:{expr_lem_with_dash}")
+        # print(f"expr_lem_without_dash:{expr_lem_without_dash}")
+    else:
+        expr_lem = lemmatize_expression( remove_stop_words_french(original_request_normalized_without_dash, True, False), conn)  # e.g., "directeur immobilier"
+        expr_boolean = ' '.join(f'+{word}' for word in expr_lem.split())
+        #print(f"expr_lem:{expr_lem}")
+   
+
+    # ---- 4️⃣ Convert to Boolean mode format ----
+    # Example result: "+directeur +immobilier"
+
+    cursor = conn.cursor()
+
+    # ---- 6️⃣ SQL query with HAVING ----
+    if "-" in original_request:
+         query = f"""
+                SELECT COUNT(DISTINCT siren) AS matching_companies
+                FROM (
+
+                /* -------------------------------
+                   1️⃣ AFNIC
+                -------------------------------- */
+                SELECT
+                    s.siren
+                FROM (
+                    SELECT
+                        COALESCE(
+                            sirentrouve,
+                            sirentrouveaadresse,
+                            sirentrouve_semantique
+                        ) AS siren
+                    FROM Afnic_Light1225_full
+                    WHERE MATCH(
+                            title_lemmatise,
+                            description_lemmatise,
+                            keywords_lemmatise,
+                            TexteHome_lemmatise,
+                            keyword_nomdedomaine_lemmatise
+                          )
+                        AGAINST('{expr_lem_without_dash}' IN BOOLEAN MODE)
+                      AND (
+                            (sirentrouve IS NOT NULL and sirentrouve != 0)
+                            OR (sirentrouveaadresse IS NOT NULL and sirentrouveaadresse != 0)
+                            OR (sirentrouve_semantique IS NOT NULL and sirentrouve_semantique != 0)
+                          )
+                           AND (
+                            title_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            OR description_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            OR keywords_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            OR TexteHome_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            OR keyword_nomdedomaine_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            )
+                ) af
+                INNER JOIN {TABLE_FAST} s
+                    ON s.siren = af.siren
+                WHERE
+                    {where_cmd_without_and}
+
+                UNION
+
+                /* -------------------------------
+                   2️⃣ BODACC
+                -------------------------------- */
+                SELECT
+                    s.siren
+                FROM Bodacc_Light1225_full b
+                INNER JOIN {TABLE_FAST} s
+                    ON s.siren = b.siren
+                WHERE MATCH(b.Objet_Social_lemmatisee)
+                      AGAINST('{expr_lem_without_dash}' IN BOOLEAN MODE)
+                  {where_cmd_with_and}
+                AND Objet_Social_lemmatisee LIKE '%{expr_lem_with_dash}%'
+
+
+                UNION
+
+                /* -------------------------------
+                   3️⃣ SIRENE
+                -------------------------------- */
+                SELECT
+                    s.siren
+                FROM {TABLE_FAST} s
+                WHERE MATCH(s.Nom_entreprise_lemmatise, s.Nom_enseigne)
+                      AGAINST('{expr_lem_without_dash}' IN BOOLEAN MODE)
+                  {where_cmd_with_and}
+                   AND (
+                    Nom_entreprise_lemmatise LIKE '{expr_lem_with_dash}'
+                 OR Nom_enseigne LIKE '{expr_lem_with_dash}'
+              )
+
+            ) t
+            WHERE siren IS NOT NULL and siren != 0
+                """
+    else:
+        query = f"""
+        SELECT COUNT(DISTINCT siren) AS matching_companies
+        FROM (
+
+        /* -------------------------------
+           1️⃣ AFNIC
+        -------------------------------- */
+        SELECT
+            s.siren
+        FROM (
+            SELECT
+                COALESCE(
+                    sirentrouve,
+                    sirentrouveaadresse,
+                    sirentrouve_semantique
+                ) AS siren
+            FROM Afnic_Light1225_full
+            WHERE MATCH(
+                    title_lemmatise,
+                    description_lemmatise,
+                    keywords_lemmatise,
+                    TexteHome_lemmatise,
+                    keyword_nomdedomaine_lemmatise
+                  )
+                AGAINST('{expr_boolean}' IN BOOLEAN MODE)
+              AND (
+                    (sirentrouve IS NOT NULL and sirentrouve != 0)
+                    OR (sirentrouveaadresse IS NOT NULL and sirentrouveaadresse != 0)
+                    OR (sirentrouve_semantique IS NOT NULL and sirentrouve_semantique != 0)
+                  )
+        ) af
+        INNER JOIN {TABLE_FAST} s
+            ON s.siren = af.siren
+        WHERE
+            {where_cmd_without_and}
+
+        UNION
+
+        /* -------------------------------
+           2️⃣ BODACC
+        -------------------------------- */
+        SELECT
+            s.siren
+        FROM Bodacc_Light1225_full b
+        INNER JOIN {TABLE_FAST} s
+            ON s.siren = b.siren
+        WHERE MATCH(b.Objet_Social_lemmatisee)
+              AGAINST('{expr_boolean}' IN BOOLEAN MODE)
+          {where_cmd_with_and}
+
+        UNION
+
+        /* -------------------------------
+           3️⃣ SIRENE
+        -------------------------------- */
+        SELECT
+            s.siren
+        FROM {TABLE_FAST} s
+        WHERE MATCH(s.Nom_entreprise_lemmatise, s.Nom_enseigne)
+              AGAINST('{expr_boolean}' IN BOOLEAN MODE)
+          {where_cmd_with_and}
+
+    ) t
+    WHERE siren IS NOT NULL and siren != 0
+        """
+
+    # ---- 7️⃣ Print query for debugging ----
+    print("DEBUG: SQL Query to execute:")
+    print(query)
+
+    # ---- 8️⃣ Execute query ----
+    cursor.execute(query)
+    result = cursor.fetchone()
+    matching_rows = result[0]
+
+
+    #print(f"Number of matching rows: {matching_rows}")
+    return matching_rows
     # discard < 3 letters and figures
     # remove stop words
     # count siren from WEB
@@ -574,10 +1131,37 @@ def count_semantic(original_request):
     # count siren from Nom_entreprise et Nom_enseigne
     # 
 
+def require_api_key_v1(func):
+    @wraps(func)
+    def decorated(*args, **kwargs):
+        # Normalize headers to lowercase for case-insensitive lookup
+        headers = {k.lower(): v for k, v in request.headers.items()}
 
-def require_api_key(func):
+        # Try X-Api-Key first
+        api_key = headers.get("x-api-key")
+
+        #print(f"api_key:{api_key}")
+        # Fallback to Authorization header: Bearer <token>
+        if not api_key:
+            auth_header = headers.get("authorization")
+            if auth_header and auth_header.lower().startswith("bearer "):
+                api_key = auth_header.split(" ", 1)[1]
+
+        # print("All headers received:", dict(request.headers))
+        # print(f"API key received:{api_key}:")
+        # print(f"API_KEYS:{API_KEYS}:")
+        # print(not api_key or api_key not in API_KEYS)
+        if not api_key or api_key not in API_KEYS:
+            return jsonify({"error": "Unauthorized: Invalid or missing API key"}), 401
+
+        return func(*args, **kwargs)
+    return decorated
+
+
+
+
+def require_api_key_v2(func):
    
-
     AUTH_WINDOW = 300  # 5 minutes
 
     @wraps(func)
@@ -591,7 +1175,8 @@ def require_api_key(func):
         if not api_key or not timestamp or not signature:
             return jsonify({"error": "Missing authentication headers"}), 401
 
-        API_KEYS = json.loads(os.getenv("API_KEYS", "{}"))
+        #print(os.getenv("API_KEYS_V2", "{}"))
+        API_KEYS = json.loads(os.getenv("API_KEYS_V2", "{}"))
 
         secret = API_KEYS.get(api_key)
         if not secret:
@@ -621,118 +1206,146 @@ def require_api_key(func):
 
     return decorated
 
-@app.route('/count_bot_v2', methods=['POST'])
-@require_api_key
-
-def count_companies():
+def count_companies_logic(criteria: dict):
     """
-    Endpoint pour compter les entreprises correspondant aux critères de ciblage
+    Pure business logic.
+    Returns a Python dict ONLY.
     """
-    #print("API_KEY:", os.getenv("API_KEY"))
-
     start_time = time.perf_counter()
     timestamp = datetime.now()
+
+    response = None
+
     try:
-        # Validation du content-type
-        if not request.is_json:
-            logger.warning("Content-Type not JSON")
-            return jsonify({'error': 'Content-Type must be application/json'}), 400
-        
-        # Récupération des données
-        #print(f"request:{request}")
-        criteria = request.get_json()
-        logger.debug(f"Received criteria: {criteria}")
-
         if not criteria:
-            logger.warning("Request body is empty")
-            return jsonify({'error': 'Request body is empty'}), 400
-
-        # Determine where the actual criteria dict is
-        criteria_dict = criteria.get("criteria", criteria)
-
-        # Convert employees ranges to salaries
-        criteria_dict = convert_employees_range_to_salaries(criteria_dict)
-
-        # Update original JSON if needed
-        if "criteria" in criteria:
-            criteria["criteria"] = criteria_dict
-        else:
-            criteria = criteria_dict
-
-        # --- Total count legal ---
-        query, params = build_query(criteria)
-        check_sql_params(query, params)
-        debug_sql = format_sql_for_debug(query, params)
-        logger.debug("SQL (printable): %s", debug_sql)
+            raise ValueError("Request body is empty")
 
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+
+        criteria_dict = criteria.get("criteria", criteria)
+
+        criteria_dict = convert_employees_range_to_salaries(criteria_dict)
+
+        original_activity_request = (
+            criteria_dict.get('activity', {})
+            .get('original_activity_request', [])
+        )
+
+        # --- Total count legal ---
+        query, params = build_query(criteria_dict)
+        check_sql_params(query, params)
+
+        debug_sql = format_sql_for_debug(query, params)
         cursor.execute(debug_sql)
+
         result = cursor.fetchone()
         total_count_legal = result['count'] if result else 0
-        cursor.close()
-        conn.close()
-        logger.info("Total count legal: %d", total_count_legal)
 
-        # --- Individual counts per activity_code (legal only) ---
+        # --- Semantic ---
+        if original_activity_request:
+            #print(f"strip_activite_condition(debug_sql):{strip_activite_condition(debug_sql)}")
+            total_count_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn)
+        else:
+            total_count_semantic = 0
+
+        # --- Individual counts ---
         activity_individual_counts = {}
-        activity_codes = criteria.get('activity', {}).get('activity_codes_list', [])
+        activity_codes = criteria_dict.get('activity', {}).get('activity_codes_list', [])
 
-        if activity_codes:
-            for code in activity_codes:
-                criteria_single = copy.deepcopy(criteria)
-                criteria_single['activity'] = {
-                    'present': True,
-                    'activity_codes_list': [code]
-                }
+        for code in activity_codes:
+            criteria_single = copy.deepcopy(criteria_dict)
+            criteria_single['activity'] = {
+                'present': True,
+                'activity_codes_list': [code]
+            }
 
-                query_code, params_code = build_query(criteria_single)
-                check_sql_params(query_code, params_code)
-                debug_sql_code = format_sql_for_debug(query_code, params_code)
-                logger.debug("SQL preview for activity_code '%s': %s", code, debug_sql_code)
+            query_code, params_code = build_query(criteria_single)
+            debug_sql_code = format_sql_for_debug(query_code, params_code)
 
-                conn = get_db_connection()
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute(debug_sql_code)
-                result_code = cursor.fetchone()
-                cursor.close()
-                conn.close()
+            cursor.execute(debug_sql_code)
+            result_code = cursor.fetchone()
 
-                activity_individual_counts[code] = {
-                    "count_legal": result_code['count'] if result_code else 0
-                }
+            activity_individual_counts[code] = {
+                "count_legal": result_code['count'] if result_code else 0
+            }
 
-        # --- Build response ---
         response = {
-            'status': 'success',
             'count_legal': total_count_legal,
-            'activity_individual_counts': activity_individual_counts if activity_codes else None,
-            'criteria_applied': {
-                'localization': criteria.get('location', {}).get('present', False),
-                'activity': criteria.get('activity', {}).get('present', False),
-                'company_size': criteria.get('company_size', {}).get('present', False),
-                'financial_criteria': criteria.get('financial_criteria', {}).get('present', False),
-                'legal_criteria': criteria.get('legal_criteria', {}).get('present', False)
-            },
+            'count_semantic': total_count_semantic,
+            'activity_individual_counts': activity_individual_counts or None,
             'debug_sql': debug_sql
         }
 
-        logger.info("Response: %s", response)
-        return jsonify(response), 200
+        return response
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+        duration = time.perf_counter() - start_time
+        try:
+            insert_api_log(timestamp, criteria, duration, response)
+        except Exception:
+            pass
+
+
+@app.route('/count_bot_v1', methods=['POST'])
+@require_api_key_v1
+
+def count_companies_v1():
+
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type must be application/json'}), 400
+
+    criteria = request.get_json()
+
+    try:
+        result = count_companies_logic(criteria)
+        return jsonify({
+            "status": "success",
+            **result
+        }), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     except Exception as e:
         logger.exception("Internal server error")
-        return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
-
-    finally:
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        try:
-            insert_api_log(timestamp, criteria, duration, response)
-        except Exception as e:
-            logger.error("Failed to insert API log: %s", e)
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
 
 
+@app.route('/count_bot_v2', methods=['POST'])
+@require_api_key_v2
+
+def count_companies_v2():
+
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type must be application/json'}), 400
+
+    criteria = request.get_json()
+
+    try:
+        result = count_companies_logic(criteria)
+        return jsonify({
+            "status": "success",
+            **result
+        }), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    except Exception as e:
+        logger.exception("Internal server error")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -759,7 +1372,7 @@ def method_not_allowed(error):
 
 if __name__ == '__main__':
     # Pour le développement
-    app.run(host='0.0.0.0', port=5002, debug=True)
-    
+    app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
+
     # Pour la production, utilisez un serveur WSGI comme Gunicorn:
     # gunicorn -w 4 -b 0.0.0.0:5000 app:app
