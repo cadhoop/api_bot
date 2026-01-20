@@ -18,6 +18,7 @@ import unicodedata
 import hashlib
 import hmac
 import pandas as pd
+from decimal import Decimal
 
 
 
@@ -403,6 +404,7 @@ TABLE_ALL   = f"sirene{MOIS_ANNEE}saasv9"
 TABLE_AFNIC = f"Afnic_Light{MOIS_ANNEE}_full"
 
 MIN_FULLTEXT_LENGTH = 3
+LIMIT_DISPlAY_INFO = 2
 
 
 
@@ -619,7 +621,7 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
 
 from typing import Dict, Any, List
 
-def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
+def build_query(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
     """
     Builds the SQL query and parameters from targeting criteria.
     """
@@ -735,7 +737,11 @@ def build_query(criteria: Dict[str, Any]) -> tuple[str, List[Any]]:
     # ==============================
     # Final Query Assembly
     # ==============================
-    query = f"SELECT COUNT(*) AS count FROM {table}"
+    if flag_count:
+        query = f"SELECT COUNT(*) AS count FROM {table}"
+    else:
+        query = f"SELECT siren FROM {table}"
+
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
 
@@ -956,7 +962,7 @@ def removeaccent(word, verbose=False):
 
 
 
-def count_semantic(original_request, debug_sql, conn):
+def count_semantic(original_request, debug_sql, conn, flag_count=False):
     # print(f"original_request:{original_request}")
     # print(f"debug_sql debut fct count_semantic:{debug_sql}")
     idx = debug_sql.upper().rfind("WHERE")
@@ -1013,7 +1019,7 @@ def count_semantic(original_request, debug_sql, conn):
                             sirentrouveaadresse,
                             sirentrouve_semantique
                         ) AS siren
-                    FROM Afnic_Light1225_full
+                    FROM {TABLE_AFNIC}
                     WHERE MATCH(
                             title_lemmatise,
                             description_lemmatise,
@@ -1047,7 +1053,7 @@ def count_semantic(original_request, debug_sql, conn):
                 -------------------------------- */
                 SELECT
                     s.siren
-                FROM Bodacc_Light1225_full b
+                FROM Bodacc_Light{MOIS_ANNEE}_full b
                 INNER JOIN {TABLE_FAST} s
                     ON s.siren = b.siren
                 WHERE MATCH(b.Objet_Social_lemmatisee)
@@ -1092,7 +1098,7 @@ def count_semantic(original_request, debug_sql, conn):
                     sirentrouveaadresse,
                     sirentrouve_semantique
                 ) AS siren
-            FROM Afnic_Light1225_full
+            FROM {TABLE_AFNIC}
             WHERE MATCH(
                     title_lemmatise,
                     description_lemmatise,
@@ -1119,7 +1125,7 @@ def count_semantic(original_request, debug_sql, conn):
         -------------------------------- */
         SELECT
             s.siren
-        FROM Bodacc_Light1225_full b
+        FROM Bodacc_Light{MOIS_ANNEE}_full b
         INNER JOIN {TABLE_FAST} s
             ON s.siren = b.siren
         WHERE MATCH(b.Objet_Social_lemmatisee)
@@ -1143,8 +1149,8 @@ def count_semantic(original_request, debug_sql, conn):
         """
 
     # ---- 7️⃣ Print query for debugging ----
-    print("DEBUG: SQL Query to execute:")
-    print(query)
+    # print("DEBUG: SQL Query to execute:")
+    # print(query)
 
     # ---- 8️⃣ Execute query ----
     cursor.execute(query)
@@ -1256,57 +1262,75 @@ def count_companies_logic(criteria: dict):
         criteria_dict = criteria.get("criteria", criteria)
 
         criteria_dict = convert_employees_range_to_salaries(criteria_dict)
+        # Step 1: Get the inner dictionary (execution_mode)
+        execution_block = criteria_dict.get("execution_mode", {})
 
+        # Step 2: Get the specific value (output_type)
+        # We provide "count" as a second argument so it has a default value
+        mode = execution_block.get("output_type", "count")
         original_activity_request = (
             criteria_dict.get('activity', {})
             .get('original_activity_request', [])
         )
 
         # --- Total count legal ---
-        query, params = build_query(criteria_dict)
+        query, params = build_query(criteria_dict, mode == "count")
         check_sql_params(query, params)
 
         debug_sql = format_sql_for_debug(query, params)
-        print(f"debug_sql:{debug_sql}")
+        #print(f"debug_sql:{debug_sql}")
         cursor.execute(debug_sql)
 
-        result = cursor.fetchone()
-        total_count_legal = result['count'] if result else 0
+        if mode == "count":
+            result = cursor.fetchone()
+            total_count_legal = result['count'] if result else 0
+       
+            # --- Semantic ---
+            if original_activity_request:
+                #print(f"strip_activite_condition(debug_sql):{strip_activite_condition(debug_sql)}")
+                total_count_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, True)
+            else:
+                total_count_semantic = 0
 
-        # --- Semantic ---
-        if original_activity_request:
-            #print(f"strip_activite_condition(debug_sql):{strip_activite_condition(debug_sql)}")
-            total_count_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn)
+            # --- Individual counts ---
+            activity_individual_counts = {}
+            activity_codes = criteria_dict.get('activity', {}).get('activity_codes_list', [])
+
+            for code in activity_codes:
+                criteria_single = copy.deepcopy(criteria_dict)
+                criteria_single['activity'] = {
+                    'present': True,
+                    'activity_codes_list': [code]
+                }
+
+                query_code, params_code = build_query(criteria_single, True)
+                debug_sql_code = format_sql_for_debug(query_code, params_code)
+
+                cursor.execute(debug_sql_code)
+                result_code = cursor.fetchone()
+
+                activity_individual_counts[code] = {
+                    "count_legal": result_code['count'] if result_code else 0
+                }
+
+
+            response = {
+                'count_legal': total_count_legal,
+                'count_semantic': total_count_semantic,
+                'activity_individual_counts': activity_individual_counts or None,
+                'debug_sql': debug_sql
+            }
+
         else:
-            total_count_semantic = 0
+            result = cursor.fetchall()
+            #print(f"result:{result}")
+            siren_list = [row['siren'] for row in result]
 
-        # --- Individual counts ---
-        activity_individual_counts = {}
-        activity_codes = criteria_dict.get('activity', {}).get('activity_codes_list', [])
-
-        for code in activity_codes:
-            criteria_single = copy.deepcopy(criteria_dict)
-            criteria_single['activity'] = {
-                'present': True,
-                'activity_codes_list': [code]
+            # Mapping to a dictionary first
+            response = {
+                "count": len(siren_list),
+                "results": siren_list
             }
-
-            query_code, params_code = build_query(criteria_single)
-            debug_sql_code = format_sql_for_debug(query_code, params_code)
-
-            cursor.execute(debug_sql_code)
-            result_code = cursor.fetchone()
-
-            activity_individual_counts[code] = {
-                "count_legal": result_code['count'] if result_code else 0
-            }
-
-        response = {
-            'count_legal': total_count_legal,
-            'count_semantic': total_count_semantic,
-            'activity_individual_counts': activity_individual_counts or None,
-            'debug_sql': debug_sql
-        }
 
         return response
 
@@ -1322,41 +1346,123 @@ def count_companies_logic(criteria: dict):
         except Exception:
             pass
 
+  
+def get_company_info(list_siren):
 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)  
+    # 1. Sécurité : vérifier que c'est bien une liste de nombres
+    if isinstance(list_siren, dict):
+        list_siren = list_siren.get('results', [])
+
+    if not list_siren:
+        return json.dumps({"data": []})
+
+    # 2. Générer dynamiquement le BON nombre de %s
+    # Si len(list_siren) est 14, il y aura 14 fois %s
+    placeholders = ', '.join(['%s'] * len(list_siren))
+    
+    sql = f"""
+        SELECT 
+            siren, Commune, Code_postal, Departement, Region, 
+            Activite_entreprise, Libelle_activite_entreprises, Tranche_effectif_entreprise, 
+            Date_creation_entreprise, Capital, CA_le_plus_recent, 
+            Resultat_net_le_plus_recent, Rentabilite_la_plus_recente
+        FROM {TABLE_ALL}
+        WHERE siren IN ({placeholders}) limit {LIMIT_DISPlAY_INFO}
+    """
+
+    # 3. Conversion en tuple pour le connecteur MySQL
+    cursor.execute(sql, tuple(list_siren)) 
+    rows = cursor.fetchall()
+
+    # 4. Data Transformation
+    siren_result_list = [row['siren'] for row in rows]
+
+    output = {
+        "metadata": {
+            "total_found": len(rows),
+            "requested_count": len(list_siren)
+        },
+        "siren_list": siren_result_list,
+        "data": rows
+    }
+    #print(f"output:{output}")
+    return json.dumps(output, indent=4, default=str, ensure_ascii=False)
+
+#finally:
+    cursor.close()
+    conn.close()
 
 
 @app.route('/count_bot_v1', methods=['POST'])
 @require_api_key_v1
 
-def count_companies_v1():
+def get_companies_v1():
 
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
     criteria = request.get_json()
+    criteria_dict = criteria.get("criteria", criteria)
 
-    try:
-        result = count_companies_logic(criteria)
+    execution_block = criteria_dict.get("execution_mode", {})
+    #print(f"execution_block:{execution_block}")
+
+    # Step 2: Get the specific value (output_type)
+    # We provide "count" as a second argument so it has a default value
+    mode = execution_block.get("output_type", "count")
+
+    #print(f"mode:{mode}")
+    if mode == "count":
+        try:
+            result = count_companies_logic(criteria)
+
+            return jsonify({
+                "status": "success",
+                **result
+            }), 200
+
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+        except Exception as e:
+            logger.exception("Internal server error")
+            return jsonify({
+                'error': 'Internal server error',
+                'message': str(e)
+            }), 500
+
         return jsonify({
             "status": "success",
             **result
         }), 200
 
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    elif mode == "display":
 
-    except Exception as e:
-        logger.exception("Internal server error")
+        result = count_companies_logic(criteria)
+
+        #print(f"result:{result}")
+        company_info = get_company_info(result)
+        #print(f"company_info:{company_info}")
+
         return jsonify({
-            'error': 'Internal server error',
-            'message': str(e)
+            "status": "success",
+            "company_info": company_info
+        }), 200
+    else:
+        logger.exception("Incorrect data return mode")
+        return jsonify({
+        'error': 'Incorrect data return mode',
+        'message': str(e)
         }), 500
+    
 
 
 @app.route('/count_bot_v2', methods=['POST'])
 @require_api_key_v2
 
-def count_companies_v2():
+def get_companies_v2():
 
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
@@ -1365,10 +1471,44 @@ def count_companies_v2():
 
     try:
         result = count_companies_logic(criteria)
-        return jsonify({
-            "status": "success",
-            **result
-        }), 200
+        criteria_dict = criteria.get("criteria", criteria)
+        # Step 1: Get the inner dictionary (execution_mode)
+        # doc try to be compatible with 
+        
+        execution_block = criteria_dict.get("execution_mode", {})
+        #print(f"execution_block:{execution_block}")
+
+        # Step 2: Get the specific value (output_type)
+        # We provide "count" as a second argument so it has a default value
+        mode = execution_block.get("output_type", "count")
+
+        #print(f"mode:{mode}")
+        if mode == "count":
+
+            return jsonify({
+                "status": "success",
+                **result
+            }), 200
+
+        elif mode == "display":
+
+            #print(f"result:{result}")
+            company_info = get_company_info(result)
+            #print(f"company_info:{company_info}")
+
+            return jsonify({
+                "status": "success",
+                "company_info": company_info
+            }), 200
+        else:
+            logger.exception("Incorrect data return mode")
+            return jsonify({
+            'error': 'Incorrect data return mode',
+            'message': str(e)
+        }), 500
+
+       
+
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
