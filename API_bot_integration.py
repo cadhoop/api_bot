@@ -19,8 +19,9 @@ import hashlib
 import hmac
 import pandas as pd
 from decimal import Decimal
+from openpyxl.utils import get_column_letter
 
-
+# nohup python3 API_bot_integration.py > app.log 2>&1 &
 
 # -- 1️⃣ Drop the table if it already exists
 # mysql> DROP TABLE IF EXISTS `sirene1225saasv9_bot`;
@@ -45,6 +46,7 @@ from decimal import Decimal
 #     ->   `Rentabilite_la_plus_recente` decimal(10,4) DEFAULT NULL,
 #     ->   `Nom_entreprise_lemmatise` varchar(150) DEFAULT NULL,
 #     ->   `Nom_enseigne` varchar(120) DEFAULT NULL,
+#     ->   `Nom_entreprise` varchar(150) DEFAULT NULL,
 #     ->   PRIMARY KEY (`siren`),
 #     ->   KEY `idx_commune` (`Commune`),
 #     ->   KEY `idx_departement` (`Departement`),
@@ -99,7 +101,7 @@ from decimal import Decimal
 #     ->     s.Nom_entreprise_lemmatise,
 #     ->     s.Nom_enseigne
 #     -> FROM sirene1225saasv9 s
-#     -> WHERE s.Siege_entreprise = '1';
+#     -> WHERE s.Siege_entreprise = 'oui';
 # Query OK, 0 rows affected (0,00 sec)
 # Records: 0  Duplicates: 0  Warnings: 0
 
@@ -109,8 +111,7 @@ from decimal import Decimal
 # Query OK, 13065137 rows affected (2 hours 22 min 52,25 sec)
 # Records: 13065137  Duplicates: 0  Warnings: 0
 
-# ALTER TABLE `sirene1225saasv9_bot`
-#     -> ADD FULLTEXT KEY `ft_nom_entreprise_enseigne` (`Nom_entreprise_lemmatise`, `Nom_enseigne`);
+# ALTER TABLE `sirene1225saasv9_bot` ADD FULLTEXT KEY `ft_nom_entreprise_enseigne` (`Nom_entreprise_lemmatise`, `Nom_enseigne`);
 # Query OK, 0 rows affected, 1 warning (27 min 11,86 sec)
 
 
@@ -404,7 +405,8 @@ TABLE_ALL   = f"sirene{MOIS_ANNEE}saasv9"
 TABLE_AFNIC = f"Afnic_Light{MOIS_ANNEE}_full"
 
 MIN_FULLTEXT_LENGTH = 3
-LIMIT_DISPlAY_INFO = 2
+LIMIT_DISPLAY_INFO = 2
+UNITARY_PRICE_LEGAL_INFOS = 0.10
 
 
 
@@ -533,29 +535,22 @@ def get_db_connection():
         raise
 
 
-
 def strip_activite_condition(sql: str) -> str:
-    """
-    Remove 'Activite_entreprise IN (...)' from a SQL query
-    whether it appears after WHERE or after AND.
-    """
-
-    # Case 1: WHERE Activite_entreprise IN (...) AND
+    #print(f"sql before strip: {sql}")
+    
+    # On remplace la condition spécifique par une condition toujours vraie
+    # Cela évite les problèmes de syntaxe (AND AND, WHERE AND, etc.)
     sql = re.sub(
-        r"WHERE\s+Activite_entreprise\s+IN\s*\([^)]*\)\s+AND\s+",
-        "WHERE ",
+        r"Activite_entreprise\s+IN\s*\([^)]*\)",
+        "1=1",
         sql,
         flags=re.IGNORECASE
     )
 
-    # Case 2: AND Activite_entreprise IN (...)
-    sql = re.sub(
-        r"\s+AND\s+Activite_entreprise\s+IN\s*\([^)]*\)",
-        "",
-        sql,
-        flags=re.IGNORECASE
-    )
-    #print(f"retour sql stripped:{sql}")
+    # Nettoyage des espaces doubles pour faire propre
+    sql = re.sub(r"\s+", " ", sql).strip()
+
+    #print(f"retour sql stripped: {sql}")
     return sql
 
 
@@ -964,15 +959,16 @@ def removeaccent(word, verbose=False):
 
 def count_semantic(original_request, debug_sql, conn, flag_count=False):
     # print(f"original_request:{original_request}")
-    # print(f"debug_sql debut fct count_semantic:{debug_sql}")
+    #print(f"debug_sql debut fct count_semantic:{debug_sql}")
     idx = debug_sql.upper().rfind("WHERE")
     if idx == -1:
-        return None
+        where_cmd_with_and      = "AND 1 = 1"
+        where_cmd_without_and   = "1 = 1"
     else: 
         where_cmd_with_and = "AND " + debug_sql[idx + len("WHERE"):].strip()
         where_cmd_without_and = debug_sql[idx + len("WHERE"):].strip()
 
-    #print(f"where_cmd_with_and:{where_cmd_with_and}")
+    #print(f"****where_cmd_with_and:{where_cmd_with_and}")
     # ---- 1️⃣ Your lemmatization function ----
     def lemmatize(text: str) -> str:
         # Replace with your actual lemmatization
@@ -1034,11 +1030,11 @@ def count_semantic(original_request, debug_sql, conn, flag_count=False):
                             OR (sirentrouve_semantique IS NOT NULL and sirentrouve_semantique != 0)
                           )
                            AND (
-                            title_lemmatise LIKE '%{expr_lem_with_dash}%'
-                            OR description_lemmatise LIKE '%{expr_lem_with_dash}%'
-                            OR keywords_lemmatise LIKE '%{expr_lem_with_dash}%'
-                            OR TexteHome_lemmatise LIKE '%{expr_lem_with_dash}%'
-                            OR keyword_nomdedomaine_lemmatise LIKE '%{expr_lem_with_dash}%'
+                            title LIKE '%{expr_lem_with_dash}%'
+                            OR description LIKE '%{expr_lem_with_dash}%'
+                            OR keywords LIKE '%{expr_lem_with_dash}%'
+                            OR TexteHome LIKE '%{expr_lem_with_dash}%'
+                            OR keywords LIKE '%{expr_lem_with_dash}%'
                             )
                 ) af
                 INNER JOIN {TABLE_FAST} s
@@ -1059,7 +1055,7 @@ def count_semantic(original_request, debug_sql, conn, flag_count=False):
                 WHERE MATCH(b.Objet_Social_lemmatisee)
                       AGAINST('{expr_lem_without_dash}' IN BOOLEAN MODE)
                   {where_cmd_with_and}
-                AND Objet_Social_lemmatisee LIKE '%{expr_lem_with_dash}%'
+                AND Objet_Social LIKE '%{expr_lem_with_dash}%'
 
 
                 UNION
@@ -1074,7 +1070,7 @@ def count_semantic(original_request, debug_sql, conn, flag_count=False):
                       AGAINST('{expr_lem_without_dash}' IN BOOLEAN MODE)
                   {where_cmd_with_and}
                    AND (
-                    Nom_entreprise_lemmatise LIKE '{expr_lem_with_dash}'
+                    Nom_entreprise LIKE '{expr_lem_with_dash}'
                  OR Nom_enseigne LIKE '{expr_lem_with_dash}'
               )
 
@@ -1278,7 +1274,6 @@ def count_companies_logic(criteria: dict):
         check_sql_params(query, params)
 
         debug_sql = format_sql_for_debug(query, params)
-        #print(f"debug_sql:{debug_sql}")
         cursor.execute(debug_sql)
 
         if mode == "count":
@@ -1287,7 +1282,7 @@ def count_companies_logic(criteria: dict):
        
             # --- Semantic ---
             if original_activity_request:
-                #print(f"strip_activite_condition(debug_sql):{strip_activite_condition(debug_sql)}")
+               
                 total_count_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, True)
             else:
                 total_count_semantic = 0
@@ -1369,23 +1364,29 @@ def get_company_info(list_siren):
             Date_creation_entreprise, Capital, CA_le_plus_recent, 
             Resultat_net_le_plus_recent, Rentabilite_la_plus_recente
         FROM {TABLE_ALL}
-        WHERE siren IN ({placeholders}) limit {LIMIT_DISPlAY_INFO}
+        WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui'
     """
+
 
     # 3. Conversion en tuple pour le connecteur MySQL
     cursor.execute(sql, tuple(list_siren)) 
     rows = cursor.fetchall()
 
     # 4. Data Transformation
-    siren_result_list = [row['siren'] for row in rows]
+    rows_display = rows[:LIMIT_DISPLAY_INFO]
+
+    siren_result_list_display = [row['siren'] for row in rows_display]
+
+    price = len(set([row['siren'] for row in rows])) * UNITARY_PRICE_LEGAL_INFOS
 
     output = {
         "metadata": {
             "total_found": len(rows),
-            "requested_count": len(list_siren)
+            "requested_count": len(list_siren),
+            "price": round(price)
         },
-        "siren_list": siren_result_list,
-        "data": rows
+        "siren_list": siren_result_list_display,
+        "data": rows_display,  # <- now limited
     }
     #print(f"output:{output}")
     return json.dumps(output, indent=4, default=str, ensure_ascii=False)
@@ -1393,6 +1394,176 @@ def get_company_info(list_siren):
 #finally:
     cursor.close()
     conn.close()
+
+
+def get_company_file(criteria, list_siren):
+    #print(f"Critéres reçus : {criteria}")
+    
+    
+    # On récupère les champs dans execution_mode
+
+    exec_mode = criteria.get('execution_mode', {})
+    raw_email = exec_mode.get('email_address', 'inconnu')
+
+    #print(f"exec_mode:{exec_mode}")
+    web_email_req = exec_mode.get('web_site_email_requested', False)
+    web_phone_req = exec_mode.get('web_site_phone_requested', False)
+    #print(f"web_email_req:{web_email_req}")
+    #print(f"web_phone_req:{web_phone_req}")
+
+    # On nettoie l'email (remplacement des caractères spéciaux par des underscores)
+    clean_email = re.sub(r'[^a-zA-Z0-9]', '_', raw_email)
+    
+    # 2. Génération du Timestamp (format: 20240522_143005)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 3. Construction du nom de fichier dynamique
+    file_name = f"export_{clean_email}_{timestamp}.xlsx"
+    #print(file_name)
+    file_path = f"./customer_files/{file_name}"
+
+    # Initialisation pour éviter les UnboundLocalError
+    output = {"metadata": {"total_found": 0, "file_link": None}}
+    # Assurez-vous que ce dossier existe sur votre serveur
+    
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_db_connection()
+        # dictionary=True est crucial pour que Pandas transforme les lignes en colonnes
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Extraction de la liste de SIREN
+        if isinstance(list_siren, dict):
+            list_siren = list_siren.get('results', [])
+
+        if not list_siren:
+            return json.dumps({"metadata": {"total_found": 0, "file_link": None}})
+
+        placeholders = ', '.join(['%s'] * len(list_siren))
+
+        if (web_email_req and not web_phone_req):
+            #print("web_email_req and not web_phone_req")
+            # 2. Requête SQL avec email
+            sql = f"""
+                SELECT 
+                    siren, Commune, Code_postal, Departement, Region, 
+                    Activite_entreprise, Libelle_activite_entreprises, Tranche_effectif_entreprise, 
+                    Date_creation_entreprise, Capital, CA_le_plus_recent, 
+                    Resultat_net_le_plus_recent, Rentabilite_la_plus_recente, Best_email
+                FROM {TABLE_ALL}
+                WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui'  AND Best_Email like '%@%'
+            """
+        elif (web_phone_req and not web_email_req):
+            # 2. Requête SQL avec telephone
+            sql = f"""
+                SELECT 
+                    siren, Commune, Code_postal, Departement, Region, 
+                    Activite_entreprise, Libelle_activite_entreprises, Tranche_effectif_entreprise, 
+                    Date_creation_entreprise, Capital, CA_le_plus_recent, 
+                    Resultat_net_le_plus_recent, Rentabilite_la_plus_recente, Telephone_fixe, Telephone_mobile
+                FROM {TABLE_ALL}
+                WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui' AND Presence_numeros_de_telephone = 'oui'
+            """
+
+        elif (web_email_req and web_phone_req):
+            # 2. Requête SQL avec telephone
+            sql = f"""
+                SELECT 
+                    siren, Commune, Code_postal, Departement, Region, 
+                    Activite_entreprise, Libelle_activite_entreprises, Tranche_effectif_entreprise, 
+                    Date_creation_entreprise, Capital, CA_le_plus_recent, 
+                    Resultat_net_le_plus_recent, Rentabilite_la_plus_recente, Best_Email, Telephone_fixe, Telephone_mobile
+                FROM {TABLE_ALL}
+                WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui' AND Best_Email like '%@%' AND Presence_numeros_de_telephone = 'oui'
+            """
+        else:
+            # 2. Requête SQL
+            sql = f"""
+                SELECT 
+                    siren, Commune, Code_postal, Departement, Region, 
+                    Activite_entreprise, Libelle_activite_entreprises, Tranche_effectif_entreprise, 
+                    Date_creation_entreprise, Capital, CA_le_plus_recent, 
+                    Resultat_net_le_plus_recent, Rentabilite_la_plus_recente
+                FROM {TABLE_ALL}
+                WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui' 
+            """
+
+        # 3. Exécution
+        cursor.execute(sql, tuple(list_siren)) 
+        rows = cursor.fetchall()
+
+        if rows:
+            df_data = pd.DataFrame(rows)
+
+            # --- PRÉPARATION ONGLET PARAMÉTRAGE ---
+            setup_rows = []
+            for section, details in criteria.items():
+                if isinstance(details, dict):
+                    status = "ACTIF" if details.get('present') else "INACTIF"
+                    # On filtre 'present' pour ne garder que les valeurs des filtres
+                    params = ", ".join([f"{k}: {v}" for k, v in details.items() if k != 'present'])
+                    setup_rows.append({
+                        "Section": section.upper(), 
+                        "Statut": status, 
+                        "Détails des filtres": params if params else "Aucun filtre spécifique"
+                    })
+            df_setup = pd.DataFrame(setup_rows)
+
+            # --- GÉNÉRATION EXCEL ---
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                # Création des feuilles
+                df_setup.to_excel(writer, index=False, sheet_name='Parametrage')
+                df_data.to_excel(writer, index=False, sheet_name='Entreprises')
+
+
+                # Mise en forme 'Entreprises'
+                ws_data = writer.sheets['Entreprises']
+                ws_data.freeze_panes = 'A2' # Fige les titres
+                
+                # Mapping des largeurs personnalisées
+                column_widths = {
+                    'siren': 15, 'Commune': 30, 'Code_postal': 12, 'Departement': 15,
+                    'Region': 30, 'Activite_entreprise': 10, 'Libelle_activite_entreprises': 50,
+                    'Tranche_effectif_entreprise': 27, 'Date_creation_entreprise': 20,
+                    'Capital': 15, 'CA_le_plus_recent': 20, 'Resultat_net_le_plus_recent': 25,
+                    'Rentabilite_la_plus_recente': 30, 'Best_Email': 40, 'Telephone_fixe':40, 'Telephone_mobile':40
+                }
+
+                for i, col_name in enumerate(df_data.columns):
+                    col_letter = get_column_letter(i + 1) # Utilisation de la fonction importée
+                    width = column_widths.get(col_name, 15)
+                    ws_data.column_dimensions[col_letter].width = width
+
+                # Mise en forme 'Parametrage'
+                ws_setup = writer.sheets['Parametrage']
+                ws_setup.column_dimensions['A'].width = 25
+                ws_setup.column_dimensions['B'].width = 15
+                ws_setup.column_dimensions['C'].width = 80
+
+            file_link = f"https://www.markethings.io/customer_files/{file_name}"
+        else:
+            file_link = None
+
+        output = {
+            "metadata": {
+                "total_found": len(rows),
+                "file_link": file_link
+            }
+        }
+
+    except Exception as e:
+        print(f"Erreur lors de la génération du fichier : {e}")
+        output = {"error": True, "message": str(e), "metadata": {"total_found": 0, "file_link": None}}
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+    return json.dumps(output, indent=4, default=str, ensure_ascii=False)
 
 
 @app.route('/count_bot_v1', methods=['POST'])
@@ -1450,11 +1621,24 @@ def get_companies_v1():
             "status": "success",
             "company_info": company_info
         }), 200
+
+    elif mode == "big_file":
+
+        result = count_companies_logic(criteria)
+
+        #print(f"result:{result}")
+        file_link = get_company_file(criteria, result)
+        #print(f"company_info:{company_info}")
+
+        return jsonify({
+            "status": "success",
+            "file_link": file_link
+        }), 200
     else:
         logger.exception("Incorrect data return mode")
         return jsonify({
         'error': 'Incorrect data return mode',
-        'message': str(e)
+        'message':  'Error server'
         }), 500
     
 
@@ -1499,6 +1683,19 @@ def get_companies_v2():
             return jsonify({
                 "status": "success",
                 "company_info": company_info
+            }), 200
+
+        elif mode == "big_file":
+
+            result = count_companies_logic(criteria)
+
+            #print(f"result:{result}")
+            file_link = get_company_file(criteria, result)
+            #print(f"company_info:{company_info}")
+
+            return jsonify({
+                "status": "success",
+                "file_link": file_link
             }), 200
         else:
             logger.exception("Incorrect data return mode")

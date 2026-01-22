@@ -7,8 +7,9 @@ import argparse
 import hashlib
 import hmac
 import sys
-import operator
 from typing import List, Optional
+import operator as op
+
 
 
 #  python3 API_bot_test.py --server="localhost"
@@ -18,7 +19,6 @@ print(f"VERSION:{VERSION}")
 
 # Cas de test avec différentes combinaisons de critères
 test_cases = [
-
     {
         "name": "Test 1 - Localisation par régions sans execution_mode for compatibility",
         "criteria": {
@@ -34,13 +34,13 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">", "value": 1700000,}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 1700000}, "count_semantic": {"op": "==", "value": 0}}
     },
 
     {
         "name": "Test 2 - Localisation par codes postaux",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {
                 "present": True,
                 "post_code": ["75001", "75002"],
@@ -59,14 +59,14 @@ test_cases = [
     {
         "name": "Test 3 - Activités NAF multiples",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {
                 "present": True,
                 "region": ["Bretagne", "Occitanie"],
                 "departement": None,
                 "post_code": None,
                 "city": None
-            },            
+            },
             "activity": {
                 "present": True,
                 "activity_codes_list": ["6201Z", "6202A", "6203Z"],
@@ -81,14 +81,15 @@ test_cases = [
                 "company_creation_date_threshold": "2015-01-01",
                 "company_creation_date_sup": True,
                 "company_creation_date_inf": False
-            }        },
+            }
+        },
         "expected": {"count_legal": {"op": ">", "value": 5000}, "count_semantic": {"op": "<=", "value": 70}}
     },
 
     {
         "name": "Test 4 - Taille PME",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": False},
             "activity": {"present": False},
             "company_size": {"present": True, "employees_number_range": "50 to 99 employees"},
@@ -101,12 +102,16 @@ test_cases = [
     {
         "name": "Test 5 - Critères financiers",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
-
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": False},
             "activity": {"present": False},
             "company_size": {"present": False},
-            "financial_criteria": {"present": True, "turnover": 5_000_000, "net_profit": 200_000, "profitability": None},
+            "financial_criteria": {
+                "present": True,
+                "turnover": 5000000,
+                "net_profit": 200000,
+                "profitability": None
+            },
             "legal_criteria": {"present": True, "headquarters": True}
         },
         "expected": {"count_legal": {"op": ">", "value": 30000}, "count_semantic": {"op": "<=", "value": 0}}
@@ -115,7 +120,7 @@ test_cases = [
     {
         "name": "Test 6 - Légal: siège + date création",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": False},
             "activity": {"present": False},
             "company_size": {"present": False},
@@ -135,7 +140,7 @@ test_cases = [
     {
         "name": "Test 7 - Légal: capital minimum",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": False},
             "activity": {"present": False},
             "company_size": {"present": False},
@@ -154,7 +159,7 @@ test_cases = [
     {
         "name": "Test 8 - Localisation + Activité + Taille",
         "criteria": {
-            "execution_mode": {"present": True,"output_type": "count" }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": True, "region": ["Île-de-France", "Occitanie"]},
             "activity": {"present": True, "activity_codes_list": ["6201Z", "6202A"]},
             "company_size": {"present": True, "employees_number_range": "10 to 19 employees"},
@@ -170,7 +175,12 @@ test_cases = [
             "location": {"present": False},
             "activity": {"present": True, "activity_codes_list": ["4690Z", "4617B"]},
             "company_size": {"present": False},
-            "financial_criteria": {"present": True, "turnover": 1_000_000, "net_profit": 50_000, "profitability": 0.05},
+            "financial_criteria": {
+                "present": True,
+                "turnover": 1000000,
+                "net_profit": 50000,
+                "profitability": 0.05
+            },
             "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5"}
         },
         "expected": {"count_legal": {"op": ">", "value": 500}, "count_semantic": {"op": "<=", "value": 0}}
@@ -179,15 +189,24 @@ test_cases = [
     {
         "name": "Test 10 - Critères complets",
         "criteria": {
-            "execution_mode": {
-                "present": True,
-                "output_type": "count"
-              }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": True, "departement": ["69", "75"]},
             "activity": {"present": True, "activity_codes_list": ["6202A", "6311Z", "6312Z"]},
             "company_size": {"present": True, "employees_number_range": ["20 to 49 employees", "50 to 99 employees"]},
-            "financial_criteria": {"present": True, "turnover": 2_000_000, "net_profit": 100_000, "profitability": 0.05},
-            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 2}
+            "financial_criteria": {
+                "present": True,
+                "turnover": 2000000,
+                "net_profit": 100000,
+                "profitability": 0.05
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 2
+            }
         },
         "expected": {"count_legal": {"op": ">", "value": 40}, "count_semantic": {"op": "<=", "value": 0}}
     },
@@ -199,7 +218,12 @@ test_cases = [
             "activity": {"present": False},
             "company_size": {"present": True, "employees_number_range": "0 employee"},
             "financial_criteria": {"present": False},
-            "legal_criteria": {"present": True, "headquarters": True, "company_creation_date_threshold": "2023-01-01", "company_creation_date_sup": True}
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "company_creation_date_threshold": "2023-01-01",
+                "company_creation_date_sup": True
+            }
         },
         "expected": {"count_legal": {"op": ">", "value": 600000}, "count_semantic": {"op": "<=", "value": 0}}
     },
@@ -207,14 +231,11 @@ test_cases = [
     {
         "name": "Test 12 - Grandes entreprises avec filiales",
         "criteria": {
-            "execution_mode": {
-                "present": True,
-                "output_type": "count"
-              }, 
+            "execution_mode": {"present": True, "output_type": "count"},
             "location": {"present": False},
             "activity": {"present": False},
             "company_size": {"present": True, "employees_number_range": "500 to 999 employees"},
-            "financial_criteria": {"present": True, "turnover": 50_000_000, "net_profit": 2_000_000},
+            "financial_criteria": {"present": True, "turnover": 50000000, "net_profit": 2000000},
             "legal_criteria": {"present": True, "headquarters": True, "subsidiaries_number": 10}
         },
         "expected": {"count_legal": {"op": ">", "value": 200}, "count_semantic": {"op": "<=", "value": 0}}
@@ -223,7 +244,13 @@ test_cases = [
     {
         "name": "Test 13 - Localisation par département",
         "criteria": {
-            "location": {"present": True, "region": None, "departement": ["92", "75"], "post_code": None, "city": None},
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": ["92", "75"],
+                "post_code": None,
+                "city": None
+            },
             "activity": {"present": False},
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
@@ -235,7 +262,13 @@ test_cases = [
     {
         "name": "Test 14 - Localisation par commune",
         "criteria": {
-            "location": {"present": True, "region": None, "departement": None, "post_code": None, "city": ["Clamart", "Toulouse"]},
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": None,
+                "post_code": None,
+                "city": ["Clamart", "Toulouse"]
+            },
             "activity": {"present": False},
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
@@ -243,20 +276,12 @@ test_cases = [
         },
         "expected": {"count_legal": {"op": ">", "value": 100000}, "count_semantic": {"op": "<=", "value": 2000}}
     },
-      {
+
+    {
         "name": "Test 15 - Activités NAF multiples avec stop xwords et lemmatisation",
         "criteria": {
-            "execution_mode": {
-                "present": True,
-                "output_type": "count"
-              }, 
-            "location": {
-                "present": True,
-                "region": None,
-                "departement": None,
-                "post_code": None,
-                "city": None
-            },            
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {"present": True},
             "activity": {
                 "present": True,
                 "activity_codes_list": ["6201Z", "6202A", "6203Z"],
@@ -264,63 +289,33 @@ test_cases = [
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
-            "legal_criteria": {
-                "present": True,
-                "headquarters": True,
-                "legal_category": "Société commerciale",
-                "company_creation_date_threshold": None,
-                "company_creation_date_sup": None,
-                "company_creation_date_inf": None,
-            }        },
-        "expected": {"count_legal": {"op": ">", "value": 8000}, "count_semantic": {"op": "<=", "value": 70}}
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 150000}, "count_semantic": {"op": "<=", "value": 100}}
     },
 
     {
         "name": "Test 16 - Activités NAF multiples avec apostrophe",
         "criteria": {
-            "execution_mode": {
-                "present": True,
-                "output_type": "count"
-              }, 
-            "location": {
-                "present": True,
-                "region": None,
-                "departement": None,
-                "post_code": None,
-                "city": None
-            },            
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {"present": True},
             "activity": {
                 "present": True,
-                "activity_codes_list": ["6619B", " 6619B"],
+                "activity_codes_list": ["6619B"],
                 "original_activity_request": "banque d'investissements"
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
-            "legal_criteria": {
-                "present": True,
-                "headquarters": True,
-                "legal_category": "Société commerciale",
-                "company_creation_date_threshold": None,
-                "company_creation_date_sup": None,
-                "company_creation_date_inf": None,
-            }        },
-        "expected": {"count_legal": {"op": ">", "value": 10000}, "count_semantic": {"op": "<=", "value": 5000}}
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 15000}, "count_semantic": {"op": ">=", "value": 5000}}
     },
 
     {
-        "name": "Test 17 - Activités NAF multiples avec apostrophe",
+        "name": "Test 17 - Activités NAF multiples avec e-sport",
         "criteria": {
-            "execution_mode": {
-                "present": True,
-                "output_type": "count"
-              },  
-            "location": {
-                "present": True,
-                "region": None,
-                "departement": None,
-                "post_code": None,
-                "city": None
-            },            
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {"present": True},
             "activity": {
                 "present": True,
                 "activity_codes_list": ["9319Z"],
@@ -328,60 +323,56 @@ test_cases = [
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
-            "legal_criteria": {
-                "present": True,
-                "headquarters": True,
-                "legal_category": "Société commerciale",
-                "company_creation_date_threshold": None,
-                "company_creation_date_sup": None,
-                "company_creation_date_inf": None,
-            }        },
-        "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 40}}
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
     },
 
-     {
+    {
         "name": "Test 18 - Critères complets",
         "criteria": {
-        "execution_mode": {
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {
                 "present": True,
-                "output_type": "count"
-              },  
-            "location": {"present": True, "region": ["Occitanie"], "departement": ["92", "75"], "post_code":  ["92140"], "city": ["Clamart", "Toulouse"]},
-
+                "region": ["Occitanie"],
+                "departement": ["92", "75"],
+                "post_code": ["92140"],
+                "city": ["Clamart", "Toulouse"]
+            },
             "activity": {
                 "present": True,
                 "activity_codes_list": ["1071C"],
                 "original_activity_request": "boulangerie"
-            },            
+            },
             "company_size": {"present": True, "employees_number_range": ["10 to 19 employees"]},
             "financial_criteria": {
-              "present": True,
-              
-              "turnover": 20000,
-              "turnover_sup": True,
-              "turnover_inf": False,
-              
-              "net_profit": 5000,
-              "net_profit_sup": True,
-              "net_profit_inf": False,
-              
-              "profitability": 0.01,
-              "profitability_sup": True,
-              "profitability_inf": False
-            },            
-            "legal_criteria": {"present": True, "headquarters": True, "legal_form": "5", "capital": 10000, "capital_threshold_sup": True, "subsidiaries_number": 1}
+                "present": True,
+                "turnover": 20000,
+                "turnover_sup": True,
+                "turnover_inf": False,
+                "net_profit": 5000,
+                "net_profit_sup": True,
+                "net_profit_inf": False,
+                "profitability": 0.01,
+                "profitability_sup": True,
+                "profitability_inf": False
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 1
+            }
         },
         "expected": {"count_legal": {"op": ">", "value": 15}, "count_semantic": {"op": ">", "value": 10}}
     },
-     {
+
+    {
         "name": "Test 19 - Localisation par codes postaux et demande de display",
         "criteria": {
-
-
-           "execution_mode": {
-                "present": True,
-                "output_type": "display"
-              },            
+            "execution_mode": {"present": True, "output_type": "display"},
             "location": {
                 "present": True,
                 "post_code": ["43800"],
@@ -397,6 +388,207 @@ test_cases = [
         "expected": {"count_legal": {"op": ">", "value": 1}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
+    {
+        "name": "Test 20 - Critères complets avec fichier sans email",
+        "criteria": {
+            "execution_mode": {
+                "present": True,
+                "output_type": "big_file",
+                "email_address": "charles-antoine@markethings.io",
+                "web_site_email_requested": False,
+                "web_site_phone_requested": False
+            },
+            "location": {
+                "present": True,
+                "region": ["Occitanie"],
+                "departement": ["92", "75"],
+                "post_code": ["92140"],
+                "city": ["Clamart", "Toulouse"]
+            },
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["1071C"],
+                "original_activity_request": "boulangerie"
+            },
+            "company_size": {"present": True, "employees_number_range": ["10 to 19 employees"]},
+            "financial_criteria": {
+                "present": True,
+                "turnover": 20000,
+                "turnover_sup": True,
+                "turnover_inf": False,
+                "net_profit": 5000,
+                "net_profit_sup": True,
+                "net_profit_inf": False,
+                "profitability": 0.01,
+                "profitability_sup": True,
+                "profitability_inf": False
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 1
+            }
+
+        },            
+        "expected": {"file_size":  {"op": ">", "value": 5000}}
+
+    },
+
+    {
+        "name": "Test 21 - Critères complets avec fichier avec email et telephone",
+        "criteria": {
+            "execution_mode": {
+                "present": True,
+                "output_type": "big_file",
+                "email_address": "charles-antoine@markethings.io",
+                "web_site_email_requested": True,
+                "web_site_phone_requested": True
+            },
+            "location": {
+                "present": True,
+                "region": ["Occitanie"],
+                "departement": ["92", "75"],
+                "post_code": ["92140"],
+                "city": ["Clamart", "Toulouse"]
+            },
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["7022Z"],
+                "original_activity_request": "conseil digital"
+            },
+            "company_size": {
+                "present": True,
+                "employees_number_range": ["3 to 5 employees", "6 to 9 employees", "10 to 19 employees"]
+            },
+            "financial_criteria": {
+                "present": True,
+                "turnover": 20000,
+                "turnover_sup": True,
+                "turnover_inf": False,
+                "net_profit": 5000,
+                "net_profit_sup": True,
+                "net_profit_inf": False,
+                "profitability": 0.01,
+                "profitability_sup": True,
+                "profitability_inf": False
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 1
+            },
+            "expected": {"file_size": 12000}
+
+        }
+    },
+
+    {
+        "name": "Test 22 - Critères complets avec fichier avec email only",
+        "criteria": {
+            "execution_mode": {
+                "present": True,
+                "output_type": "big_file",
+                "email_address": "charles-antoine@markethings.io",
+                "web_site_email_requested": False,
+                "web_site_phone_requested": True
+            },
+            "location": {
+                "present": True,
+                "region": ["Occitanie"],
+                "departement": ["92", "75"],
+                "post_code": ["92140"],
+                "city": ["Clamart", "Toulouse"]
+            },
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["7022Z"],
+                "original_activity_request": "conseil digital"
+            },
+            "company_size": {
+                "present": True,
+                "employees_number_range": ["3 to 5 employees", "6 to 9 employees", "10 to 19 employees"]
+            },
+            "financial_criteria": {
+                "present": True,
+                "turnover": 20000,
+                "turnover_sup": True,
+                "turnover_inf": False,
+                "net_profit": 5000,
+                "net_profit_sup": True,
+                "net_profit_inf": False,
+                "profitability": 0.01,
+                "profitability_sup": True,
+                "profitability_inf": False
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 1
+            }
+        },
+        "expected": {"file_size": 12000}
+
+    },
+
+    {
+        "name": "Test 23 - Critères complets avec fichier avec telephone only",
+        "criteria": {
+            "execution_mode": {
+                "present": True,
+                "output_type": "big_file",
+                "email_address": "charles-antoine@markethings.io",
+                "web_site_email_requested": True,
+                "web_site_phone_requested": False
+            },
+            "location": {
+                "present": True,
+                "region": ["Occitanie"],
+                "departement": ["92", "75"],
+                "post_code": ["92140"],
+                "city": ["Clamart", "Toulouse"]
+            },
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["7022Z"],
+                "original_activity_request": "conseil digital"
+            },
+            "company_size": {
+                "present": True,
+                "employees_number_range": ["3 to 5 employees", "6 to 9 employees", "10 to 19 employees"]
+            },
+            "financial_criteria": {
+                "present": True,
+                "turnover": 20000,
+                "turnover_sup": True,
+                "turnover_inf": False,
+                "net_profit": 5000,
+                "net_profit_sup": True,
+                "net_profit_inf": False,
+                "profitability": 0.01,
+                "profitability_sup": True,
+                "profitability_inf": False
+            },
+            "legal_criteria": {
+                "present": True,
+                "headquarters": True,
+                "legal_form": "5",
+                "capital": 10000,
+                "capital_threshold_sup": True,
+                "subsidiaries_number": 1
+            }
+        },            
+        "expected": {"file_size": 12000}
+
+    }
 ]
 
 
@@ -576,6 +768,9 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
     # Run tests
     for i, test_case in tests_to_run:
+
+        business_ok = False
+
         print(f"Running test {i}: {test_case.get('name')}")
 
         start_time = time.perf_counter()
@@ -587,94 +782,176 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
         response = result.get('response', {})
 
-           
-        # 1. On récupère la donnée brute (qui est un str selon l'erreur)
+        # 1. Extraction du lien de fichier (depuis le JSON imbriqué dans 'file_link')
+        file_info = {}
+
+         # 2. On récupère la donnée brute (qui est un str selon l'erreur)
         raw_company_info = response.get('company_info', '{}')
 
+        raw_count_legal = response.get('count_legal')
+
+        raw_file_link_info = response.get('file_link', '{}')
+
+       
+        if isinstance(raw_file_link_info, str) and raw_file_link_info != "{}" and raw_file_link_info.strip() != "":
+            try:
+                file_info = json.loads(raw_file_link_info)
+            except json.JSONDecodeError:
+                print("Erreur : file_link n'est pas un JSON valide")
+                file_info = {}
+
+            # 2. Récupération des métadonnées
+            metadata = file_info.get("metadata", {})
+            file_url = metadata.get("file_link", "")
+            total_found = metadata.get("total_found", 0)
+
+            # 3. Test de la taille du fichier si demandé dans les "expected"
+            expected = test_case.get("expected", {})
+            file_size_rule = expected.get("file_size")
+
+            file_size_ok = True  # ✅ True by default if no rule
+            actual_size = None
+            operator = None
+            expected_value = None
+
+            if isinstance(file_size_rule, dict) and file_url:
+                operator = file_size_rule.get("op")
+                expected_value = file_size_rule.get("value")
+
+                # Extraction du nom du fichier
+                file_name = file_url.split("/")[-1]
+                local_path = f"./customer_files/{file_name}"
+
+                if os.path.exists(local_path):
+                    actual_size = os.path.getsize(local_path)
+
+                    try:
+                        file_size_ok = compare(actual_size, operator, expected_value)
+                    except ValueError as e:
+                        print(f"Erreur : {e}")
+                        file_size_ok = False
+
+                    if not file_size_ok:
+                        print(
+                            f"ÉCHEC : Taille fichier {actual_size} "
+                            f"{operator} {expected_value} ❌"
+                        )
+                else:
+                    print(f"Erreur : Le fichier local {local_path} est introuvable")
+                    file_size_ok = False
+
+            # 4. Mise à jour de la validation globale
+            business_ok = file_size_ok
+
+            if business_ok:
+                print(f"✅ Test '{test_case['name']}' réussi")
+            else:
+                print(f"❌ Test '{test_case['name']}' échoué")
+                tab_errors.append(
+                    f"test_number:{test_case['name']}; "
+                    f"file_size expected {operator} {expected_value}, "
+                    f"got {actual_size}"
+                )
+                tab_errors.append(test_case)
+
+
+
         # 2. On vérifie si c'est un string et on convertit
-        if isinstance(raw_company_info, str):
+        elif isinstance(raw_company_info, str) and raw_company_info != "{}" and raw_company_info.strip() != "":
             try:
                 company_info = json.loads(raw_company_info)
             except json.JSONDecodeError:
                 print("Erreur : company_info n'est pas un JSON valide")
                 company_info = {}
-        else:
-            company_info = raw_company_info
+        # else:
+        #     company_info = raw_company_info
 
-        # 3. Maintenant vous pouvez utiliser .get() en toute sécurité
-        if isinstance(company_info, dict) and "data" in company_info:
-            sirens = company_info.get('siren_list', [])
-            # print(f"Liste des SIREN extraite : {sirens}")
-            # print(len(sirens))
+            # 3. Maintenant vous pouvez utiliser .get() en toute sécurité
+            if isinstance(company_info, dict) and "data" in company_info:
+                sirens = company_info.get('siren_list', [])
+                # print(f"Liste des SIREN extraite : {sirens}")
+                # print(len(sirens))
 
-            # Extract expected values
-            expected        = test_case.get('expected', {})
-            # 1. Récupérer le dictionnaire des attentes
-            exp_legal_dict  = expected.get('count_legal', {})
+                # Extract expected values
+                expected        = test_case.get('expected', {})
+                # 1. Récupérer le dictionnaire des attentes
+                exp_legal_dict  = expected.get('count_legal', {})
 
-            # 2. Extraire la valeur numérique (0 dans votre cas)
-            # On met 0 par défaut si la clé n'existe pas
-            count_legal = exp_legal_dict.get('value', 0)       
-            count_semantic = 0     
-            if len(sirens) > count_legal:
-                business_ok = True
-            else:
-                business_ok = False
-
-        else:
-
-            count_legal = response.get('count_legal')
-            count_semantic = response.get('count_semantic')
-
-          # Mapping string operators to Python functions
-            OPS = {
-                ">": operator.gt,
-                "<": operator.lt,
-                ">=": operator.ge,
-                "<=": operator.le,
-                "==": operator.eq,
-                "!=": operator.ne
-            }
-
-            # Extract expected values
-            expected = test_case.get('expected', {})
-            exp_legal = expected.get('count_legal', {})
-            exp_semantic = expected.get('count_semantic', {})
-
-            exp_op_legal = exp_legal.get('op')
-            exp_value_legal = exp_legal.get('value')
-
-            exp_op_semantic = exp_semantic.get('op')
-            exp_value_semantic = exp_semantic.get('value')
-
-            # ---------- BUSINESS VALIDATION ----------
-            business_ok = True
-
-            print(f"exp_legal: {exp_legal}")
-            print(f"count_legal: {count_legal}")
-
-            # Use the operator dynamically
-            if exp_op_legal and exp_value_legal is not None:
-                if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
+                # 2. Extraire la valeur numérique (0 dans votre cas)
+                # On met 0 par défaut si la clé n'existe pas
+                exp_count_legal = exp_legal_dict.get('value', 0)       
+                count_semantic = 0     
+                if len(sirens) > exp_count_legal:
+                    business_ok = True
+                else:
                     business_ok = False
-                    tab_errors.append(f"test_number:{test_case}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
+                    tab_errors.append(f"test_number:{test_case}; company info ko {exp_count_legal}, got {len(sirens)}")
                     tab_errors.append(test_case)
+        
 
-            if exp_op_semantic and exp_value_semantic is not None:
-                if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
-                    business_ok = False
-                    tab_errors.append(f"test_number:{test_case}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
-                    tab_errors.append(test_case)
+
+        elif isinstance(raw_count_legal, int):
+            
+            if raw_count_legal != "{}":
+
+                count_legal = response.get('count_legal')
+                count_semantic = response.get('count_semantic')
+
+                OPS = {
+                    ">": op.gt,
+                    "<": op.lt,
+                    ">=": op.ge,
+                    "<=": op.le,
+                    "==": op.eq,
+                    "!=": op.ne
+                }
+
+                # Extract expected values
+                expected = test_case.get('expected', {})
+                exp_legal = expected.get('count_legal', {})
+                exp_semantic = expected.get('count_semantic', {})
+
+                exp_op_legal = exp_legal.get('op')
+                exp_value_legal = exp_legal.get('value')
+
+                exp_op_semantic = exp_semantic.get('op')
+                exp_value_semantic = exp_semantic.get('value')
+
+                # ---------- BUSINESS VALIDATION ----------
+
+                # print(f"exp_legal: {exp_legal}")
+                # print(f"count_legal: {count_legal}")
+                # print(f"count_semantic: {count_semantic}")
+
+                # Use the operator dynamically
+                if exp_op_legal and exp_value_legal is not None:
+                    if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
+
+                        business_ok = False
+                        tab_errors.append(f"test_number:{test_case}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
+                        tab_errors.append(test_case)
+                    else:
+                        business_ok = True
+
+                if exp_op_semantic and exp_value_semantic is not None:
+
+                    if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
+
+                        business_ok = False
+                        tab_errors.append(f"test_number:{test_case}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
+                        tab_errors.append(test_case)
+                    else:
+                        business_ok = True
 
         success = business_ok
         status = "✓ SUCCÈS" if success else "✗ ÉCHEC"
 
-        print(
-            f"{status} - "
-            f"Count Legal: {count_legal}, "
-            f"Count Semantic: {count_semantic} "
-            f"(Durée: {duration:.3f}s)"
-        )
+        # print(
+        #     f"{status} - "
+        #     f"Count Legal: {count_legal}, "
+        #     f"Count Semantic: {count_semantic} "
+        #     f"(Durée: {duration:.3f}s)"
+        # )
 
         if tab_errors:
             print("  ❌ Validation errors:")
@@ -828,6 +1105,7 @@ def main():
 
     # Display errors in pairs
     tab_errors = []
+    print(errors)
     for i in range(0, len(errors), 2):
         error_msg = errors[i]
         test_case = errors[i+1]
