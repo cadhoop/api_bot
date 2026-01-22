@@ -11,10 +11,9 @@ from typing import List, Optional
 import operator as op
 
 
-
 #  python3 API_bot_test.py --server="localhost"
 VERSION = "V1"
-VERSION = "V2"
+#VERSION = "V2"
 print(f"VERSION:{VERSION}")
 
 # Cas de test avec différentes combinaisons de critères
@@ -70,7 +69,8 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["6201Z", "6202A", "6203Z"],
-                "original_activity_request": "farines elle"
+                "original_activity_request": "farines elle",
+                "semantic_count_requested": True
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
@@ -302,7 +302,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["6619B"],
-                "original_activity_request": "banque d'investissements"
+                "original_activity_request": "banque d'investissements",
+                "semantic_count_requested": True
+
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
@@ -319,7 +321,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["9319Z"],
-                "original_activity_request": "e-sport"
+                "original_activity_request": "e-sport",
+                "semantic_count_requested": True
+
             },
             "company_size": {"present": False},
             "financial_criteria": {"present": False},
@@ -342,7 +346,8 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["1071C"],
-                "original_activity_request": "boulangerie"
+                "original_activity_request": "boulangerie", 
+                "semantic_count_requested": True
             },
             "company_size": {"present": True, "employees_number_range": ["10 to 19 employees"]},
             "financial_criteria": {
@@ -385,7 +390,7 @@ test_cases = [
             "financial_criteria": {"present": False},
             "legal_criteria": {"present": True, "headquarters": True}
         },
-        "expected": {"count_legal": {"op": ">", "value": 1}, "count_semantic": {"op": "<=", "value": 2000}}
+        "expected": {"count_legal": {"op": ">", "value": 4}, "count_semantic": {"op": "<=", "value": 2000}}
     },
 
     {
@@ -408,7 +413,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["1071C"],
-                "original_activity_request": "boulangerie"
+                "original_activity_request": "boulangerie",
+                "semantic_count_requested": True
+
             },
             "company_size": {"present": True, "employees_number_range": ["10 to 19 employees"]},
             "financial_criteria": {
@@ -457,7 +464,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["7022Z"],
-                "original_activity_request": "conseil digital"
+                "original_activity_request": "conseil digital",
+                "semantic_count_requested": True
+
             },
             "company_size": {
                 "present": True,
@@ -489,8 +498,10 @@ test_cases = [
     },
 
     {
-        "name": "Test 22 - Critères complets avec fichier avec email only",
+        "name": "Test 22 - Critères complets avec fichier avec email only et adresse IP",
         "criteria": {
+            "security":
+                {"ip_adress": "111.222.333.444"},
             "execution_mode": {
                 "present": True,
                 "output_type": "big_file",
@@ -508,7 +519,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["7022Z"],
-                "original_activity_request": "conseil digital"
+                "original_activity_request": "conseil digital",
+                "semantic_count_requested": True
+
             },
             "company_size": {
                 "present": True,
@@ -542,6 +555,8 @@ test_cases = [
     {
         "name": "Test 23 - Critères complets avec fichier avec telephone only",
         "criteria": {
+            "security":
+                {"ip_address": "111.222.333.444"},
             "execution_mode": {
                 "present": True,
                 "output_type": "big_file",
@@ -559,7 +574,9 @@ test_cases = [
             "activity": {
                 "present": True,
                 "activity_codes_list": ["7022Z"],
-                "original_activity_request": "conseil digital"
+                "original_activity_request": "conseil digital",
+                "semantic_count_requested": True
+
             },
             "company_size": {
                 "present": True,
@@ -588,7 +605,25 @@ test_cases = [
         },            
         "expected": {"file_size": 12000}
 
-    }
+    },
+     {
+        "name": "Test 24 - Activités NAF multiples avec e-sport",
+        "criteria": {
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {"present": True},
+            "activity": {
+                "present": True,
+                "activity_codes_list": [],
+                "original_activity_request": "e-sport",
+                "semantic_count_requested": True
+
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
+    },
 ]
 
 
@@ -778,170 +813,183 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
         end_time = time.perf_counter()
         duration = end_time - start_time
 
-        results.append(result)
+        try:
+            results.append(result)
 
-        response = result.get('response', {})
+            response = result.get('response', {})
 
-        # 1. Extraction du lien de fichier (depuis le JSON imbriqué dans 'file_link')
-        file_info = {}
+            if 'error' in response:    
+                business_ok = False
+                tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
+                tab_errors.append(test_case)  
 
-         # 2. On récupère la donnée brute (qui est un str selon l'erreur)
-        raw_company_info = response.get('company_info', '{}')
 
-        raw_count_legal = response.get('count_legal')
+            # 1. Extraction du lien de fichier (depuis le JSON imbriqué dans 'file_link')
+            file_info = {}
 
-        raw_file_link_info = response.get('file_link', '{}')
+             # 2. On récupère la donnée brute (qui est un str selon l'erreur)
+            raw_company_info = response.get('company_info_legal', '{}')
 
-       
-        if isinstance(raw_file_link_info, str) and raw_file_link_info != "{}" and raw_file_link_info.strip() != "":
-            try:
-                file_info = json.loads(raw_file_link_info)
-            except json.JSONDecodeError:
-                print("Erreur : file_link n'est pas un JSON valide")
-                file_info = {}
+            raw_count_legal = response.get('count_legal')
 
-            # 2. Récupération des métadonnées
-            metadata = file_info.get("metadata", {})
-            file_url = metadata.get("file_link", "")
-            total_found = metadata.get("total_found", 0)
+            raw_file_link_info = response.get('file_link', '{}')
 
-            # 3. Test de la taille du fichier si demandé dans les "expected"
-            expected = test_case.get("expected", {})
-            file_size_rule = expected.get("file_size")
+           
+            if isinstance(raw_file_link_info, str) and raw_file_link_info != "{}" and raw_file_link_info.strip() != "":
+                try:
+                    file_info = json.loads(raw_file_link_info)
+                except json.JSONDecodeError:
+                    print("Erreur : file_link n'est pas un JSON valide")
+                    file_info = {}
 
-            file_size_ok = True  # ✅ True by default if no rule
-            actual_size = None
-            operator = None
-            expected_value = None
+                # 2. Récupération des métadonnées
+                metadata = file_info.get("metadata", {})
+                file_url = metadata.get("file_link", "")
+                total_found = metadata.get("total_found", 0)
 
-            if isinstance(file_size_rule, dict) and file_url:
-                operator = file_size_rule.get("op")
-                expected_value = file_size_rule.get("value")
+                # 3. Test de la taille du fichier si demandé dans les "expected"
+                expected = test_case.get("expected", {})
+                file_size_rule = expected.get("file_size")
 
-                # Extraction du nom du fichier
-                file_name = file_url.split("/")[-1]
-                local_path = f"./customer_files/{file_name}"
+                file_size_ok = True  # ✅ True by default if no rule
+                actual_size = None
+                operator = None
+                expected_value = None
 
-                if os.path.exists(local_path):
-                    actual_size = os.path.getsize(local_path)
+                if isinstance(file_size_rule, dict) and file_url:
+                    operator = file_size_rule.get("op")
+                    expected_value = file_size_rule.get("value")
 
-                    try:
-                        file_size_ok = compare(actual_size, operator, expected_value)
-                    except ValueError as e:
-                        print(f"Erreur : {e}")
+                    # Extraction du nom du fichier
+                    file_name = file_url.split("/")[-1]
+                    local_path = f"./customer_files/{file_name}"
+
+                    if os.path.exists(local_path):
+                        actual_size = os.path.getsize(local_path)
+
+                        try:
+                            file_size_ok = compare(actual_size, operator, expected_value)
+                        except ValueError as e:
+                            print(f"Erreur : {e}")
+                            file_size_ok = False
+
+                        if not file_size_ok:
+                            print(
+                                f"ÉCHEC : Taille fichier {actual_size} "
+                                f"{operator} {expected_value} ❌"
+                            )
+                    else:
+                        print(f"Erreur : Le fichier local {local_path} est introuvable")
                         file_size_ok = False
 
-                    if not file_size_ok:
-                        print(
-                            f"ÉCHEC : Taille fichier {actual_size} "
-                            f"{operator} {expected_value} ❌"
-                        )
+                # 4. Mise à jour de la validation globale
+                business_ok = file_size_ok
+
+                if business_ok:
+                    print(f"✅ Test '{test_case['name']}' réussi")
                 else:
-                    print(f"Erreur : Le fichier local {local_path} est introuvable")
-                    file_size_ok = False
-
-            # 4. Mise à jour de la validation globale
-            business_ok = file_size_ok
-
-            if business_ok:
-                print(f"✅ Test '{test_case['name']}' réussi")
-            else:
-                print(f"❌ Test '{test_case['name']}' échoué")
-                tab_errors.append(
-                    f"test_number:{test_case['name']}; "
-                    f"file_size expected {operator} {expected_value}, "
-                    f"got {actual_size}"
-                )
-                tab_errors.append(test_case)
+                    print(f"❌ Test '{test_case['name']}' échoué")
+                    tab_errors.append(
+                        f"test_number:{test_case['name']}; "
+                        f"file_size expected {operator} {expected_value}, "
+                        f"got {actual_size}"
+                    )
+                    tab_errors.append(test_case)
 
 
 
-        # 2. On vérifie si c'est un string et on convertit
-        elif isinstance(raw_company_info, str) and raw_company_info != "{}" and raw_company_info.strip() != "":
-            try:
-                company_info = json.loads(raw_company_info)
-            except json.JSONDecodeError:
-                print("Erreur : company_info n'est pas un JSON valide")
-                company_info = {}
-        # else:
-        #     company_info = raw_company_info
+            # 2. On vérifie si c'est un string et on convertit
+            elif isinstance(raw_company_info, list):
+                
+                # ÉTAPE 1 : Pas de json.loads, on utilise la liste directement
+                company_info_list = raw_company_info 
 
-            # 3. Maintenant vous pouvez utiliser .get() en toute sécurité
-            if isinstance(company_info, dict) and "data" in company_info:
-                sirens = company_info.get('siren_list', [])
-                # print(f"Liste des SIREN extraite : {sirens}")
-                # print(len(sirens))
+                # ÉTAPE 2 : Extraction des SIREN depuis la liste
+                # Puisque chaque élément de la liste est une entreprise avec une clé 'siren'
+                sirens = [item.get('siren') for item in company_info_list if isinstance(item, dict) and 'siren' in item]
 
-                # Extract expected values
-                expected        = test_case.get('expected', {})
-                # 1. Récupérer le dictionnaire des attentes
-                exp_legal_dict  = expected.get('count_legal', {})
-
-                # 2. Extraire la valeur numérique (0 dans votre cas)
-                # On met 0 par défaut si la clé n'existe pas
-                exp_count_legal = exp_legal_dict.get('value', 0)       
-                count_semantic = 0     
+                #print(f"sirens:{sirens}")
+                
+                # ÉTAPE 3 : Logique de validation
+                expected = test_case.get('expected', {})
+                exp_legal_dict = expected.get('count_legal', {})
+                exp_count_legal = exp_legal_dict.get('value', 0)
+                
+                # On vérifie si on a trouvé assez d'entreprises
                 if len(sirens) > exp_count_legal:
                     business_ok = True
                 else:
                     business_ok = False
-                    tab_errors.append(f"test_number:{test_case}; company info ko {exp_count_legal}, got {len(sirens)}")
+                    tab_errors.append(f"test_number:{test_case.get('test_number')}; company info ko expected > {exp_count_legal}, got {len(sirens)}")
                     tab_errors.append(test_case)
+
+
+            elif isinstance(raw_count_legal, int):
+                
+                if raw_count_legal != "{}":
+
+                    # --- EXTRACTION ET NETTOYAGE DES VALEURS ---
+                    # On s'assure de récupérer un entier, même si la réponse est un tuple (ex: (123,)) ou une liste [(123,)]
+                    def clean_count(val):
+                        if isinstance(val, (list, tuple)):
+                            if len(val) > 0:
+                                # Si c'est une liste de tuples : [(123,)]
+                                inner = val[0]
+                                return inner[0] if isinstance(inner, tuple) else inner
+                            return 0
+                        return val
+
+                    count_legal = clean_count(response.get('count_legal'))
+                    count_semantic = clean_count(response.get('count_semantic'))
+
+                    OPS = {
+                        ">": op.gt,
+                        "<": op.lt,
+                        ">=": op.ge,
+                        "<=": op.le,
+                        "==": op.eq,
+                        "!=": op.ne
+                    }
+
+                    # Extract expected values
+                    expected = test_case.get('expected', {})
+                    exp_legal = expected.get('count_legal', {})
+                    exp_semantic = expected.get('count_semantic', {})
+
+                    exp_op_legal = exp_legal.get('op')
+                    exp_value_legal = exp_legal.get('value')
+
+                    exp_op_semantic = exp_semantic.get('op')
+                    exp_value_semantic = exp_semantic.get('value')
+
+                    # ---------- BUSINESS VALIDATION ----------
+                    business_ok = True  # Initialisé à True, passera à False si une erreur survient
+
+                    # Validation Legal
+                    if exp_op_legal and exp_value_legal is not None:
+                        if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
+                            business_ok = False
+                            tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
+                            tab_errors.append(test_case)
+
+                    # Validation Semantic
+                    if exp_op_semantic and exp_value_semantic is not None:
+                        if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
+                            business_ok = False
+                            tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
+                            tab_errors.append(test_case)
+
+        except ValueError as e:
+            print(f"Value error: {e}")
+            tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
+            tab_errors.append(test_case)
+            business_ok = False
         
-
-
-        elif isinstance(raw_count_legal, int):
-            
-            if raw_count_legal != "{}":
-
-                count_legal = response.get('count_legal')
-                count_semantic = response.get('count_semantic')
-
-                OPS = {
-                    ">": op.gt,
-                    "<": op.lt,
-                    ">=": op.ge,
-                    "<=": op.le,
-                    "==": op.eq,
-                    "!=": op.ne
-                }
-
-                # Extract expected values
-                expected = test_case.get('expected', {})
-                exp_legal = expected.get('count_legal', {})
-                exp_semantic = expected.get('count_semantic', {})
-
-                exp_op_legal = exp_legal.get('op')
-                exp_value_legal = exp_legal.get('value')
-
-                exp_op_semantic = exp_semantic.get('op')
-                exp_value_semantic = exp_semantic.get('value')
-
-                # ---------- BUSINESS VALIDATION ----------
-
-                # print(f"exp_legal: {exp_legal}")
-                # print(f"count_legal: {count_legal}")
-                # print(f"count_semantic: {count_semantic}")
-
-                # Use the operator dynamically
-                if exp_op_legal and exp_value_legal is not None:
-                    if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
-
-                        business_ok = False
-                        tab_errors.append(f"test_number:{test_case}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
-                        tab_errors.append(test_case)
-                    else:
-                        business_ok = True
-
-                if exp_op_semantic and exp_value_semantic is not None:
-
-                    if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
-
-                        business_ok = False
-                        tab_errors.append(f"test_number:{test_case}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
-                        tab_errors.append(test_case)
-                    else:
-                        business_ok = True
+        except Exception as e:
+            print(f"error Exception: {e}")
+            tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
+            tab_errors.append(test_case)
+            business_ok = False
 
         success = business_ok
         status = "✓ SUCCÈS" if success else "✗ ÉCHEC"
