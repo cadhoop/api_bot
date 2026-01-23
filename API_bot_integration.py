@@ -22,141 +22,19 @@ from decimal import Decimal
 from openpyxl.utils import get_column_letter
 import math
 import argparse
+import psutil
 
+
+from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT
 
 app = Flask(__name__)
+app.config['JSON_AS_ASCII'] = False
+
 # Empêche Flask de trier les clés alphabétiquement
 app.json.sort_keys = False
 
 # nohup python3 API_bot_integration.py > app.log 2>&1 &
 
-# -- 1️⃣ Drop the table if it already exists
-# mysql> DROP TABLE IF EXISTS `sirene1225saasv9_bot`;
-# Query OK, 0 rows affected (0,08 sec)
-
-# mysql> 
-# mysql> -- 2️⃣ Create the table
-# mysql> CREATE TABLE `sirene1225saasv9_bot` (
-#   `siren` bigint NOT NULL,
-#   `Commune` varchar(255) DEFAULT NULL,
-#   `Code_postal` int DEFAULT NULL,
-#   `Departement` smallint DEFAULT NULL,
-#   `Region` varchar(100) DEFAULT NULL,
-#   `Activite_entreprise` varchar(200) DEFAULT NULL,
-#   `Tranche_effectif_entreprise` varchar(50) DEFAULT NULL,
-#   `Date_creation_entreprise` date DEFAULT NULL,
-#   `Capital` bigint DEFAULT NULL,
-#   `Nombre_etablissements` int DEFAULT NULL,
-#   `Categorie_juridique` varchar(255) DEFAULT NULL,
-#   `CA_le_plus_recent` bigint DEFAULT NULL,
-#   `Resultat_net_le_plus_recent` bigint DEFAULT NULL,
-#   `Rentabilite_la_plus_recente` decimal(10,4) DEFAULT NULL,
-#   `Nom_entreprise_lemmatise` varchar(150) DEFAULT NULL,
-#   `Nom_enseigne` varchar(120) DEFAULT NULL,
-#   `Nom_entreprise` varchar(150) DEFAULT NULL,
-#   PRIMARY KEY (`siren`),
-#   KEY `idx_commune` (`Commune`),
-#   KEY `idx_departement` (`Departement`),
-#   KEY `idx_region` (`Region`),
-#   KEY `idx_code_postal` (`Code_postal`),
-#   KEY `idx_activite_entreprise` (`Activite_entreprise`),
-#   KEY `idx_tranche_effectif` (`Tranche_effectif_entreprise`),
-#   KEY `idx_date_creation` (`Date_creation_entreprise`),
-#   KEY `idx_capital` (`Capital`),
-#   KEY `idx_nombre_etablissements` (`Nombre_etablissements`),
-#   KEY `idx_categorie_juridique` (`Categorie_juridique`),
-#   KEY `idx_ca_recent` (`CA_le_plus_recent`),
-#   KEY `idx_rentabilite` (`Rentabilite_la_plus_recente`),
-#   KEY `idx_region_activite` (`Region`,`Activite_entreprise`),
-#   KEY `idx_region_effectif` (`Region`,`Tranche_effectif_entreprise`),
-#   KEY `idx_region_activite_effectif` (`Region`,`Activite_entreprise`,`Tranche_effectif_entreprise`),
-#   KEY `idx_dept_activite` (`Departement`,`Activite_entreprise`),
-#   KEY `idx_dept_effectif` (`Departement`,`Tranche_effectif_entreprise`),
-#   KEY `idx_dept_activite_effectif` (`Departement`,`Activite_entreprise`,`Tranche_effectif_entreprise`),
-#   KEY `idx_cp_activite_effectif` (`Code_postal`,`Activite_entreprise`,`Tranche_effectif_entreprise`),
-#   KEY `idx_commune_activite_effectif` (`Commune`,`Activite_entreprise`,`Tranche_effectif_entreprise`),
-#   KEY `idx_activite_ca_power` (`Activite_entreprise`,`CA_le_plus_recent`),
-#   KEY `idx_activite_rentabilite_power` (`Activite_entreprise`,`Rentabilite_la_plus_recente`),
-#   KEY `idx_region_ca_recent` (`Region`,`CA_le_plus_recent`),
-#   KEY `idx_cp_ca_recent` (`Code_postal`,`CA_le_plus_recent`),
-#   KEY `idx_ca_resultat` (`CA_le_plus_recent`,`Resultat_net_le_plus_recent`),
-#   FULLTEXT KEY `ft_nom_entreprise_enseigne` (`Nom_entreprise_lemmatise`,`Nom_enseigne`)
-# ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-# Query OK, 0 rows affected (0,38 sec)
-
-# mysql> 
-# mysql> -- 3️⃣ Insert data from sirene1225saasv9 where Siege_entreprise = '1'
-# mysql> INSERT INTO sirene1225saasv9_bot (
-#     ->     siren,
-#     ->     Commune,
-#     ->     Code_postal,
-#     ->     Departement,
-#     ->     Region,
-#     ->     Activite_entreprise,
-#     ->     Tranche_effectif_entreprise,
-#     ->     Date_creation_entreprise,
-#     ->     Capital,
-#     ->     Nombre_etablissements,
-#     ->     Categorie_juridique,
-#     ->     CA_le_plus_recent,
-#     ->     Resultat_net_le_plus_recent,
-#     ->     Rentabilite_la_plus_recente,
-#     ->     Nom_entreprise_lemmatise,
-#     ->     Nom_enseigne
-#     -> )
-#     -> SELECT
-#     ->     s.Siren,
-#     ->     s.Commune,
-#     ->     s.Code_postal,
-#     ->     s.Departement,
-#     ->     s.Region,
-#     ->     s.Activite_entreprise,
-#     ->     s.Tranche_effectif_entreprise,
-#     ->     s.Date_creation_entreprise,
-#     ->     s.Capital,
-#     ->     s.Nombre_etablissements,
-#     ->     s.Categorie_juridique,
-#     ->     s.CA_le_plus_recent,
-#     ->     s.Resultat_net_le_plus_recent,
-#     ->     s.Rentabilite_la_plus_recente,
-#     ->     s.Nom_entreprise_lemmatise,
-#     ->     s.Nom_enseigne
-#     -> FROM sirene1225saasv9 s
-#     -> WHERE s.Siege_entreprise = 'oui';
-# Query OK, 0 rows affected (0,00 sec)
-# Records: 0  Duplicates: 0  Warnings: 0
-
-# mysql> INSERT INTO sirene1225saasv9_bot (     siren,     Commune,     Code_postal,     Departement,     Region,     Activite_entreprise,     Tranche_effectif_entreprise,     Date_creation_entreprise,     Capital,     Nombre_etablissements,
-#     Categorie_juridique,     CA_le_plus_recent,     Resultat_net_le_plus_recent,     Rentabilite_la_plus_recente,     Nom_entreprise_lemmatise,     Nom_enseigne ) SELECT     s.Siren,     s.Commune,     s.Code_postal,     s.Departement,
-# s.Region,     s.Activite_entreprise,     s.Tranche_effectif_entreprise,     s.Date_creation_entreprise,     s.Capital,     s.Nombre_etablissements,     s.Categorie_juridique,     s.CA_le_plus_recent,     s.Resultat_net_le_plus_recent,     s.Rentabilite_la_plus_recente,     s.Nom_entreprise_lemmatise,     s.Nom_enseigne FROM sirene1225saasv9 s WHERE s.Siege_entreprise = 'oui';
-# Query OK, 13065137 rows affected (2 hours 22 min 52,25 sec)
-# Records: 13065137  Duplicates: 0  Warnings: 0
-
-# ALTER TABLE `sirene1225saasv9_bot` ADD FULLTEXT KEY `ft_nom_entreprise_enseigne` (`Nom_entreprise_lemmatise`, `Nom_enseigne`);
-# Query OK, 0 rows affected, 1 warning (27 min 11,86 sec)
-
-
-# CREATE TABLE LogAPI_bot (
-#     id INT AUTO_INCREMENT PRIMARY KEY,
-#     timestamp DATETIME NOT NULL,
-#     request_json JSON NOT NULL,
-#     duration FLOAT NOT NULL,
-#     response_json JSON NOT NULL
-# );
-
-# # Configure logging
-# logging.basicConfig(
-#     level=logging.DEBUG,  # or INFO in production
-#     format='%(asctime)s [%(levelname)s] %(message)s',
-#     handlers=[
-#         logging.StreamHandler(sys.stdout),  # logs to console
-#         logging.FileHandler("api.log")      # optional: logs to a file
-#     ]
-# )
-# log = logging.getLogger('werkzeug')  # Flask’s HTTP request logger
-# log.setLevel(logging.WARNING)
-
-# logger = logging.getLogger(__name__)
 
 # 1. Initialiser le parseur
 parser = argparse.ArgumentParser(description="Script API Bot avec mode verbose")
@@ -174,6 +52,15 @@ if args.verbose == "yes":
     print("--- MODE VERBOSE ACTIVÉ ---")
     print(f"Arguments reçus : {args}")
     VERBOSE = True
+
+
+hostname = socket.gethostname()
+if hostname == "frhb96148ds":
+    DB_CONFIG = DB_CONFIG_ikoula3
+elif hostname == "dhoop-NS5x-NS7xAU":
+    DB_CONFIG = DB_CONFIG_ekima
+
+
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)  # keep DEBUG for file logging
@@ -240,29 +127,6 @@ if not isinstance(API_KEYS, dict):
 #print(f"API_KEYS:{API_KEYS}:")
 
 
-
-
-# Configuration de la base de données MySQL
-DB_CONFIG_ekima = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', 3306),
-    'database': os.getenv('DB_NAME', 'webscan'),
-    'user': os.getenv('DB_USER', 'webscan'),
-    'password': os.getenv('DB_PASSWORD', 'Garenne92&&'),
-    'charset': 'utf8mb4',
-    'use_unicode': True
-}
-
-DB_CONFIG_ikoula3 = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', 3306),
-    'database': os.getenv('DB_NAME', 'webscan'),
-    'user': os.getenv('DB_USER', 'webscan'),
-    'password': os.getenv('DB_PASSWORD', 'Garenne2025&&'),
-    'charset': 'utf8mb4',
-    'use_unicode': True
-}
-
 hostname = socket.gethostname()
 if hostname == "frhb96148ds":
     DB_CONFIG = DB_CONFIG_ikoula3
@@ -271,179 +135,7 @@ elif hostname == "dhoop-NS5x-NS7xAU":
 
 #print(DB_CONFIG)
 # Mapping des champs API vers les champs de la base de données
-FIELD_MAPPING = {
-    "post_code": "Code_postal",
-    "departement": "Departement",
-    "region": "Region",
-    "city": "Commune",
-    "activity_codes_list": "Activite_entreprise",
-    "original_activity_request": "Original_request",
-    "employees_number_range": "Tranche_effectif_entreprise",
-    "turnover": "CA_le_plus_recent",
-    "net_profit": "Resultat_net_le_plus_recent",
-    "profitability": "Rentabilite_la_plus_recente",
-    "legal_category": "Categorie_juridique",
-    "headquarters": "Siege_entreprise",
-    "company_creation_date_threshold": "Date_creation_entreprise",
-    "capital": "Capital",
-    "subsidiaries_number": "Nombre_etablissements"
-}
 
-TAB_STOPWORDS = [
-    "a",
-    "à",
-    "alors",
-    "au",
-    "aucun",
-    "aucuns",
-    "aussi",
-    "autre",
-    "aux",
-    "avant",
-    "avec",
- #"avoir",
- #"bien",
-   # "bon",
-    "ça",
-    "car",
-    "ce",
-    "cela",
-    "ces",
-    "cette",
-    "ceux",
-    "chaque",
-    "ci",
-    "comme",
-    "comment",
-    #"copyright",
-    "dans",
-    "de",
-    "début",
-    "dedans",
-    "dehors",
-    "depuis",
-    "des",
-    "devrait",
-    #"dimanche",
-    "doit",
-    "donc",
-    #"dos",
-    "du",
-    "elle",
-    "elles",
-    "en",
-    "encore",
-    "est",
-    "et",
-    "et/ou",
-    "étaient",
-    #"état",
-    "été",
-    "etes",
-    "étions",
-    #"etre",
-    #"être",
-    "eu",
-    #"faire",
-    "fait",
-    "faites",
-    #"fois",
-    "font",
-    #"hors",
-    "ici",
-    "il",
-    "ils",
-    "je",
-    #"jeudi",
-    #"jour",
-    "juste",
-    "la",
-    "là",
-    "le",
-    "les",
-    "leur",
-    #"lundi",
-    "ma",
-    #"maintenant",
-    "mais",
-    #"mardi",
-    "même",
-    #"mercredi",
-    "mes",
-    "mettre",
-    #"moins",
-    "mon",
-    #"mot",
-    "ni",
-    "nommés",
-    "non",
-    "nos",
-    "notre",
-    "nous",
-    "ou",
-    "où",
-    "par",
-    "parce",
-    "pas",
-    "peu",
-    "peut",
-    "plupart",
-    "plus",
-    "pour",
-    "pourquoi",
-    "quand",
-    "que",
-    "quel",
-    "quelle",
-    "quelles",
-    "quels",
-    "qui",
-    "sa",
-    #"samedi",
-    "sans",
-    "se",
-    "ses",
-    "seulement",
-    "si",
-    "sien",
-    "son",
-    "sont",
-    "sous",
-    "soyez",
-    #"suite",
-    "sur",
-    "ta",
-    "tandis",
-    "tellement",
-    "tels",
-    "tes",
-    "ton",
-    "toujours",
-    "tous",
-    "tout",
-    "toute",
-    "très",
-    "trop",
-    "tu",
-    "un",
-    "une",
-    #"vendredi",
-    "voient",
-    "vont",
-    "vos",
-    "votre",
-    "vous",
-    "vu",
-]
-
-MOIS_ANNEE  = "1225"
-TABLE_FAST  = f"sirene{MOIS_ANNEE}saasv9_bot"
-TABLE_ALL   = f"sirene{MOIS_ANNEE}saasv9"
-TABLE_AFNIC = f"Afnic_Light{MOIS_ANNEE}_full"
-
-MIN_FULLTEXT_LENGTH = 3
-LIMIT_DISPLAY_INFO = 5
-UNITARY_PRICE_LEGAL_INFOS = 0.10
 
 
 
@@ -654,7 +346,7 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
 
 from typing import Dict, Any, List
 
-def build_query(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
+def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
     """
     Builds the SQL query and parameters from targeting criteria.
     """
@@ -946,9 +638,6 @@ def remove_stop_words_french(texte, supprime_accent, verbose=False):
     return " ".join(result)
 
 
-
-FRENCH_ELISIONS = r"\b(?:d|l|j|c|qu|n|s|t|m|jusqu|lorsqu|puisqu)'"
-
 def normalize_french_text(text: str) -> tuple[str, str]:
     if not text:
         return "", ""
@@ -1202,12 +891,7 @@ def count_semantic(original_request, debug_sql, conn, flag_count=False):
 
     #print(f"Number of matching rows: {matching_rows}")
     return matching_rows, cleaned_list
-    # discard < 3 letters and figures
-    # remove stop words
-    # count siren from WEB
-    # count siren from BODACC
-    # count siren from Nom_entreprise et Nom_enseigne
-    # 
+
 
 def require_api_key_v1(func):
     @wraps(func)
@@ -1325,7 +1009,9 @@ def count_companies_logic(criteria: dict):
         )
         #print(f"semantic_count_requested:{semantic_count_requested}")
         # --- Total count legal ---
-        query, params = build_query(criteria_dict, mode == "count")
+
+        # doc the function includes the swith count/list of siren
+        query, params = build_query_legal(criteria_dict, mode == "count")
         check_sql_params(query, params)
 
         debug_sql = format_sql_for_debug(query, params)
@@ -1345,9 +1031,11 @@ def count_companies_logic(criteria: dict):
        
             list_siren_semantic = None
             # --- Semantic ---
-            if semantic_count_requested:
-               
-                total_count_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, True)
+
+            # doc on laisse le double run le temps d'adaptation du front
+
+            if (semantic_count_requested or original_activity_request):
+                total_count_semantic, list_siren_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, True)
             else:
                 total_count_semantic = 0
 
@@ -1362,8 +1050,9 @@ def count_companies_logic(criteria: dict):
                     'activity_codes_list': [code]
                 }
 
-                query_code, params_code = build_query(criteria_single, True)
-                debug_sql_code = format_sql_for_debug(query_code, params_code)
+                # doc the function includes the swith count/list of siren
+                query_code, params_code = build_query_legal(criteria_single, True)
+                debug_sql_code          = format_sql_for_debug(query_code, params_code)
 
                 cursor.execute(debug_sql_code)
                 result_code = cursor.fetchone()
@@ -1383,6 +1072,7 @@ def count_companies_logic(criteria: dict):
         elif mode == "display":
 
             #print("mode : display")
+            # doc without count siren list should be provided in the sql command
             result = cursor.fetchall()
             #print(f"toto result:{result}")
             if isinstance(result, list):
@@ -1394,11 +1084,17 @@ def count_companies_logic(criteria: dict):
                 siren_list_legal = []
 
             # Votre logique de flag
-            if semantic_count_requested:
-                list_siren_semantic = siren_list_legal
+            #print(f"semantic_count_requested:{semantic_count_requested}")
+            list_siren_semantic = None
+            # doc on laisse le double run le temps d'adaptation du front
+            if (semantic_count_requested or original_activity_request):
+                # doc calcul des siren issus de la recherche sémantique.
+                total_count_semantic, list_siren_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, False)
             else:
-                list_siren_semantic = []
-
+                total_count_semantic = 0
+                list_siren_semantic = siren_list_legal
+            
+            #print(f"list_siren_semantic:{list_siren_semantic}")
             response = {
                 "count": len(siren_list_legal),
                 "results_semantic": list_siren_semantic,
@@ -1432,7 +1128,8 @@ def count_companies_logic(criteria: dict):
             pass
 
 
-def get_company_info(list_siren):
+def get_company_info(list_siren, origin_label):
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)  
 
@@ -1468,7 +1165,7 @@ def get_company_info(list_siren):
         for row in rows:
             # On définit l'ordre manuellement ici
             new_row = {
-                "Origine de la recherche": "origine sémantique",
+                "Origine de la recherche": origin_label,
                 "siren": row.get("siren"),
                 "Nom_entreprise": row.get("Nom_entreprise"),
                 "Commune": row.get("Commune"),
@@ -1671,8 +1368,125 @@ def get_company_file(criteria, list_siren):
     return json.dumps(output, indent=4, default=str, ensure_ascii=False)
 
 
+
+def trafic_control(f):
+    @wraps(f) # Important to preserve function metadata
+    def decorated_function(*args, **kwargs):
+        #print("passage traffic control")
+        conn = None
+        cursor = None
+        try:
+            # 1. Setup Database Connection
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # 2. Extract IP from incoming request
+            data = request.get_json(silent=True) or {}
+            security_block = data.get("criteria", data).get("security", {})
+            ip_address = security_block.get("ip_address", "0.0.0.0")
+
+            # 3. Query the LogAPI_bot table
+            query = """
+                SELECT COUNT(*) as count 
+                FROM LogAPI_bot 
+                WHERE ip_address = %s 
+                AND timestamp > NOW() - INTERVAL 1 DAY
+            """
+            #print(query)
+            cursor.execute(query, (ip_address,))
+            result = cursor.fetchone()
+            #print(f"result:{result}")
+            request_count = result['count'] if result else 0
+
+            # 4. Check against threshold
+            if request_count >= MAX_DAILY_REQUESTS_NUMBER:
+                logger.exception("Il semble que vous ayez entrepris beaucoup de recherches aujourd'hui. Merci de recommencer demain.")
+
+                #print("access denied")
+                return jsonify({
+                    "status": "denied",
+                    "message": "Il semble que vous ayez entrepris beaucoup de recherches aujourd'hui. Merci de recommencer demain."
+                }), 429 
+
+        except Exception as e:
+            # It's good practice to log the error so you know if the DB fails
+            print(f"Database error: {e}")
+            # Decide if you want to block or allow if the DB is down
+            
+        finally:
+            # This ensures clean up happens even if the code returns or crashes
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+        # 5. If we passed the check, execute the original function
+        return f(*args, **kwargs)
+        
+    return decorated_function
+
+def query_control(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+
+        criteria = request.get_json()
+
+        criteria_dict = criteria.get("criteria", criteria)
+
+        activity = criteria.get("activity", {})
+        
+
+        # 1. Extract the original request
+        raw_word = activity.get("original_activity_request", "")
+        
+        # 2. Use your function (unpacking the tuple)
+        # We pass VERBOSE (the global you defined earlier) to your function
+        clean_word, _ = removeaccent(raw_word, verbose=VERBOSE)
+        
+        # 3. Final cleaning for comparison
+        # We lowercase it because lists of "SANS_ACCENT" are usually lowercase
+        final_check_word = clean_word.lower().strip()
+
+        # 4. Check against your parameter list
+        if final_check_word in TAB_MOTS_SUP100000_SANS_ACCENT:
+            logger.exception(f"{MESSAGE_WORD_TOO_COMMON_1} {final_check_word} {MESSAGE_WORD_TOO_COMMON_2}")
+            print("")
+            return jsonify({
+                "status": "denied",
+                "message": f"{MESSAGE_WORD_TOO_COMMON_1} {final_check_word} {MESSAGE_WORD_TOO_COMMON_2}"
+            }), 400
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def memory_guard(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get memory statistics
+        memory_info = psutil.virtual_memory()
+        current_usage = memory_info.percent  # returns a float like 82.5
+
+        if current_usage > MEMORY_THRESHOLD_PERCENT:
+            # Log this internally so you know the server is under stress
+            logger.exception(f"CRITICAL: Memory usage at {current_usage}%! Blocking request.")
+
+            print(f"CRITICAL: Memory usage at {current_usage}%! Blocking request.")
+            
+            return jsonify({
+                "status": "denied",
+                "message": "Le serveur est actuellement très occupé. Merci de réessayer dans quelques instants."
+            }), 503  # 503 Service Unavailable is the correct code for a busy server
+
+        return f(*args, **kwargs)
+    return decorated_function
 @app.route('/count_bot_v1', methods=['POST'])
 @require_api_key_v1
+@trafic_control
+@query_control
+@memory_guard
 
 def get_companies_v1():
 
@@ -1685,7 +1499,7 @@ def get_companies_v1():
     execution_block = criteria_dict.get("execution_mode", {})
     security_block = criteria_dict.get("security", {})
     if security_block:
-        ip_address = security_block.get("ip_address"):
+        ip_address = security_block.get("ip_address")
     else:
         ip_address = "0.0.0.0"
 
@@ -1729,14 +1543,18 @@ def get_companies_v1():
             # On extrait la liste directement depuis le dictionnaire 'result'
         if isinstance(result_count_companies_logic, dict):
             # On récupère la liste d'entiers (on utilise results_legal ou results_semantic)
-            siren_list_legal = result_count_companies_logic.get('results_legal', [])
+            siren_list_legal    = result_count_companies_logic.get('results_legal', [])
+            siren_list_semantic = result_count_companies_logic.get('results_semantic', [])
+
         else:
-            siren_list_legal = []
+            siren_list_legal    = []
+            siren_list_semantic = []
+
 
         # Maintenant on appelle votre fonction SQL avec cette liste d'entiers
-        result_legal = get_company_info(siren_list_legal)
+        result_legal    = get_company_info(siren_list_legal, "origine: codes NAF")
+        result_semantic = get_company_info(siren_list_semantic, "origine: sémantique")
 
-        result_semantic = result_legal
         # 2. On construit la réponse
         # Puisque result_legal est un dictionnaire, .get() fonctionne parfaitement
         return jsonify({
@@ -1767,6 +1585,10 @@ def get_companies_v1():
 
 @app.route('/count_bot_v2', methods=['POST'])
 @require_api_key_v2
+@trafic_control
+@query_control
+@memory_guard
+
 
 def get_companies_v2():
 
@@ -1804,12 +1626,17 @@ def get_companies_v2():
             # On extrait la liste directement depuis le dictionnaire 'result'
             if isinstance(result_count_companies_logic, dict):
                 # On récupère la liste d'entiers (on utilise results_legal ou results_semantic)
-                siren_list_legal = result_count_companies_logic.get('results_legal', [])
+                siren_list_legal    = result_count_companies_logic.get('results_legal', [])
+                siren_list_semantic = result_count_companies_logic.get('results_semantic', [])
+
             else:
-                siren_list_legal = []
+                siren_list_legal    = []
+                siren_list_semantic = []
 
             # Maintenant on appelle votre fonction SQL avec cette liste d'entiers
-            result_legal = get_company_info(siren_list_legal)
+            result_legal    = get_company_info(siren_list_legal, "origine codes NAF")
+            result_semantic = get_company_info(siren_list_semantic, "origine: sémantique")
+
 
             # 2. On construit la réponse
             # Puisque result_legal est un dictionnaire, .get() fonctionne parfaitement

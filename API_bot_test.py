@@ -13,7 +13,7 @@ import operator as op
 
 #  python3 API_bot_test.py --server="localhost"
 VERSION = "V1"
-#VERSION = "V2"
+VERSION = "V2"
 print(f"VERSION:{VERSION}")
 
 # Cas de test avec différentes combinaisons de critères
@@ -624,9 +624,47 @@ test_cases = [
         },
         "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
     },
+    #  {
+    #     "name": "Test 25 - test mot interdit",
+    #     "criteria": {
+    #         "execution_mode": {"present": True, "output_type": "count"},
+    #         "location": {"present": True},
+    #         "activity": {
+    #             "present": True,
+    #             "activity_codes_list": ["9319Z"],
+    #             "original_activity_request": "immobilier",
+    #             "semantic_count_requested": True
+
+    #         },
+    #         "company_size": {"present": False},
+    #         "financial_criteria": {"present": False},
+    #         "legal_criteria": {"present": True, "headquarters": True}
+    #     },
+    #     "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
+    # },
+     {
+        "name": "Test 26 - display Activités NAF multiples avec e-sport",
+        "criteria": {
+            "execution_mode": {"present": True, "output_type": "display"},
+            "location": {"present": True},
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "e-sport",
+                "semantic_count_requested": True
+
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 3}, "count_semantic": {"op": ">", "value": 30}}
+    },
+
+
 ]
 
-
+BLACK_LIST_TESTS = ["25"]
 
 def compare(actual, operator, expected):
     if operator == "==":
@@ -790,10 +828,14 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
     success_count = 0
     tab_errors = []
 
+    
     # Determine which tests to run
     if test_numbers:
         tests_to_run = []
-        for n in test_numbers:
+        for n in test_numbers:  
+            #print(n)
+            if str(n) in BLACK_LIST_TESTS:
+                continue
             if 1 <= n <= len(test_cases):
                 tests_to_run.append((n, test_cases[n - 1]))
             else:
@@ -803,6 +845,7 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
     # Run tests
     for i, test_case in tests_to_run:
+
 
         business_ok = False
 
