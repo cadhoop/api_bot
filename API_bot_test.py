@@ -13,7 +13,7 @@ import operator as op
 
 #  python3 API_bot_test.py --server="localhost"
 VERSION = "V1"
-VERSION = "V2"
+#VERSION = "V2"
 print(f"VERSION:{VERSION}")
 
 # Cas de test avec différentes combinaisons de critères
