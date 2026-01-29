@@ -861,7 +861,8 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
             response = result.get('response', {})
 
-            if 'error' in response:    
+            if 'error' in response:   
+                print(response) 
                 business_ok = False
                 tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
                 tab_errors.append(test_case)  
@@ -1081,7 +1082,7 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
     print()
 
     # Sauvegarde des résultats détaillés
-    output_file = f"test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    output_file = f"./test_results/test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),

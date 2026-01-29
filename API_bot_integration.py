@@ -93,21 +93,25 @@ logger = logging.getLogger(__name__)
 try:
     raw = os.getenv("API_KEYS", "{}")
 
-    API_KEYS = json.loads(raw)
+    if VERBOSE:
+        print(f"*********************raw:{raw}")
+    API_KEYS_V1 = json.loads(raw)
+    if VERBOSE:
+        print(f"API_KEYS_V1:{API_KEYS_V1}")
     flag_error_key_V1 = False
 
 except json.JSONDecodeError:
     flag_error_key_V1 = True
-    raise RuntimeError("API_KEYS environment variable must be valid JSON")
+    raise RuntimeError("API_KEYS_V1 environment variable must be valid JSON")
 
 try:
     raw = os.getenv("API_KEYS_V2", "{}")
-    API_KEYS = json.loads(raw)
+    API_KEYS_V2 = json.loads(raw)
     flag_error_key_V2 = False
 
 except json.JSONDecodeError:
     flag_error_key_V2 = True
-    raise RuntimeError("API_KEYS environment variable must be valid JSON")
+    raise RuntimeError("API_KEYS_V2 environment variable must be valid JSON")
 
 if (flag_error_key_V2 or flag_error_key_V1):
     print("error lecture des clefs")
@@ -116,15 +120,29 @@ else:
     print("Chargement OK des clefs d'authentification")
 
 # Defensive fix: unwrap list if accidentally wrapped
-if isinstance(API_KEYS, list) and len(API_KEYS) == 1 and isinstance(API_KEYS[0], str):
+if isinstance(API_KEYS_V1, list) and len(API_KEYS_V1) == 1 and isinstance(API_KEYS_V1[0], str):
     try:
-        API_KEYS = json.loads(API_KEYS[0])
+        API_KEYS_V1 = json.loads(API_KEYS_V1[0])
     except json.JSONDecodeError:
-        raise RuntimeError("API_KEYS list contains invalid JSON")
+        raise RuntimeError("API_KEYS_V1 list contains invalid JSON")
 
-if not isinstance(API_KEYS, dict):
-    raise RuntimeError("API_KEYS must be a JSON object (dict)")
-#print(f"API_KEYS:{API_KEYS}:")
+if not isinstance(API_KEYS_V1, dict):
+    raise RuntimeError("API_KEYS_V1 must be a JSON object (dict)")
+
+# Defensive fix: unwrap list if accidentally wrapped
+if isinstance(API_KEYS_V2, list) and len(API_KEYS_V2) == 1 and isinstance(API_KEYS_V2[0], str):
+    try:
+        API_KEYS_V2 = json.loads(API_KEYS_V2[0])
+    except json.JSONDecodeError:
+        raise RuntimeError("API_KEYS_V2 list contains invalid JSON")
+
+if not isinstance(API_KEYS_V2, dict):
+    raise RuntimeError("API_KEYS_V2 must be a JSON object (dict)")
+
+
+if VERBOSE:
+    print(f"API_KEYS_V1:{API_KEYS_V1}:")
+    print(f"API_KEYS_V2:{API_KEYS_V2}:")
 
 
 hostname = socket.gethostname()
@@ -909,11 +927,14 @@ def require_api_key_v1(func):
             if auth_header and auth_header.lower().startswith("bearer "):
                 api_key = auth_header.split(" ", 1)[1]
 
-        # print("All headers received:", dict(request.headers))
-        # print(f"API key received:{api_key}:")
-        # print(f"API_KEYS:{API_KEYS}:")
-        # print(not api_key or api_key not in API_KEYS)
-        if not api_key or api_key not in API_KEYS:
+        if VERBOSE:
+
+            print("All headers received:", dict(request.headers))
+            print(f"API key received:{api_key}:")
+            print(f"API_KEYS_V1:{API_KEYS_V1}:")
+            print(not api_key or api_key not in API_KEYS_V1)
+            print(api_key not in API_KEYS_V1)
+        if not api_key or api_key not in API_KEYS_V1:
             return jsonify({"error": "Unauthorized: Invalid or missing API key"}), 401
 
         return func(*args, **kwargs)
@@ -1493,6 +1514,8 @@ def get_companies_v1():
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
+    if VERBOSE:
+        print(request)
     criteria = request.get_json()
     criteria_dict = criteria.get("criteria", criteria)
 
