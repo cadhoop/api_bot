@@ -158,6 +158,35 @@ app.json.sort_keys = False
 
 # logger = logging.getLogger(__name__)
 
+# billing_stripe | CREATE TABLE `billing_stripe` (
+#   `siren_check_timestamp` datetime DEFAULT CURRENT_TIMESTAMP,
+#   `stripe_id` varchar(20) NOT NULL,
+#   `criteres_json` json DEFAULT NULL,
+#   `data_file_link` varchar(200) DEFAULT NULL,
+#   `customer_email` varchar(50) DEFAULT NULL,
+#   `purchase_timestamp` datetime DEFAULT NULL,
+#   `billing_full_name` varchar(100) DEFAULT NULL,
+#   `billing_post_code` varchar(10) DEFAULT NULL,
+#   `billing_address` varchar(200) DEFAULT NULL,
+#   `card_owner` varchar(100) DEFAULT NULL,
+#   `file_price` int DEFAULT NULL,
+#   `invoice_file_link` varchar(200) DEFAULT NULL,
+#   `company` varchar(200) DEFAULT NULL,
+#   `siren` bigint DEFAULT NULL,
+#   `city` varchar(200) DEFAULT NULL,
+#   PRIMARY KEY (`stripe_id`),
+#   CONSTRAINT `check_hex_format` CHECK (regexp_like(`stripe_id`,_utf8mb4'^[0-9a-fA-F]{20}$'))
+# ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+
+#  CREATE TABLE invoice_number (
+#     ->     invoice_number INT NOT NULL AUTO_INCREMENT,
+#     ->     purchase_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+#     ->     stripe_id VARCHAR(20) NOT NULL,
+#     ->     PRIMARY KEY (invoice_number)
+#     -> ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+# Query OK, 0 rows affected (0,11 sec)
+
+
 VERBOSE = False
 
 
@@ -410,12 +439,59 @@ TABLE_FAST  = f"sirene{MOIS_ANNEE}saasv9_bot"
 TABLE_ALL   = f"sirene{MOIS_ANNEE}saasv9"
 TABLE_AFNIC = f"Afnic_Light{MOIS_ANNEE}_full"
 
+LINK_REMOTE_OVH = "https://www.markethings.io"
+raw             = os.getenv("WEB_SERVER_OVH")
+json_part       = raw[raw.find("{"):]
+data            = json.loads(json_part)
+SFTP_NAME       = next(iter(data))
+#print(f"SFTP_NAME:{SFTP_NAME}")
+
+PATH_REMOTE_OVH  = "/home/markethirs/dev"
+
+
+SFTP_PORT     = int(os.getenv("SFTP_SERVER_PORT", "22")) # "22" par défaut
+#print(f"SFTP_PORT:{SFTP_PORT}")
+
+raw             = os.getenv("WEB_SERVER_OVH_LOGIN")
+json_part       = raw[raw.find("{"):]
+data            = json.loads(json_part)
+SFTP_USERNAME   = next(iter(data))
+#print(f"SFTP_USERNAME:{SFTP_USERNAME}")
+
+raw             = os.getenv("WEB_SERVER_OVH_PASSWD")
+json_part       = raw[raw.find("{"):]
+data            = json.loads(json_part)
+SFTP_PASSWORD   = next(iter(data))
+#print(f"SFTP_PASSWORD:{SFTP_PASSWORD}")
+
+PATH_REMOTE_INVOICE_FILE    = f"{PATH_REMOTE_OVH}/customer_files/invoice"
+PATH_REMOTE_DATA_FILE       = f"{PATH_REMOTE_OVH}/customer_files/data"
+
+PATH_LOCAL_INVOICE_FILE     = "./customer_files/invoice"
+PATH_LOCAL_DATA_FILE        = "./customer_files/data"
+
+PATH_LOGO_MARKETHINGS_EKIMIA       = "/home/dhoop/Téléchargements/logo-markethings_baseline-verbes_2023.png"
+PATH_LOGO_MARKETHINGS_IKOULA3      = "/home/dhoop/Téléchargements/logo-markethings_baseline-verbes_2023.png"
+
+
+
+
+# print(SFTP_NAME)
+# print(SFTP_PORT)
+# print(SFTP_USERNAME)
+# print(SFTP_PASSWORD)
+
+# Vérification (Optionnelle mais conseillée)
+if not all([SFTP_NAME, SFTP_USERNAME, SFTP_PASSWORD]):
+    print("❌ Erreur : Certaines variables d'environnement SFTP sont manquantes !")
+
 MIN_FULLTEXT_LENGTH             = 3
 LIMIT_DISPLAY_INFO              = 5
 UNITARY_PRICE_LEGAL_INFOS       = 0.10
 MAX_DAILY_REQUESTS_NUMBER       = 1000
-AUTH_WINDOW                     = 300
+AUTH_WINDOW                     = 300   
 MEMORY_THRESHOLD_PERCENT        = 80.0
+TIME_OUT_DATA_FILE_PRODUCTION   = 5
 
 
 
@@ -423,3 +499,20 @@ FRENCH_ELISIONS = r"\b(?:d|l|j|c|qu|n|s|t|m|jusqu|lorsqu|puisqu)'"
 
 MESSAGE_WORD_TOO_COMMON_1 = "Desole, la recherche sur l'expression"
 MESSAGE_WORD_TOO_COMMON_2 = "est trop commune. Merci de preciser votre demande."
+
+
+sql = """
+CREATE TABLE id_stripe (
+    -- Date et heure de création de l'enregistrement
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    -- ID Stripe : Hexadécimal de 20 caractères, indexé pour des recherches rapides
+    stripe_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    
+    -- Stockage des critères (JSON au lieu de VARCHAR pour plus de flexibilité)
+    criteres_json JSON,
+
+    -- Contrainte pour forcer l'hexadécimal (0-9, a-f) si votre DB le supporte
+    CONSTRAINT check_hex_format CHECK (stripe_id REGEXP '^[0-9a-fA-F]{20}$')
+);"""
+#print(sql)

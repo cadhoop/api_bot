@@ -610,6 +610,7 @@ test_cases = [
         "name": "Test 24 - Activités NAF multiples avec e-sport",
         "criteria": {
             "execution_mode": {"present": True, "output_type": "count"},
+            "security": {"ip_address": "111.222.333.444"},
             "location": {"present": True},
             "activity": {
                 "present": True,
@@ -624,24 +625,24 @@ test_cases = [
         },
         "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
     },
-    #  {
-    #     "name": "Test 25 - test mot interdit",
-    #     "criteria": {
-    #         "execution_mode": {"present": True, "output_type": "count"},
-    #         "location": {"present": True},
-    #         "activity": {
-    #             "present": True,
-    #             "activity_codes_list": ["9319Z"],
-    #             "original_activity_request": "immobilier",
-    #             "semantic_count_requested": True
+     {
+        "name": "Test 25 - test mot interdit",
+        "criteria": {
+            "execution_mode": {"present": True, "output_type": "count"},
+            "location": {"present": True},
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "immobilier",
+                "semantic_count_requested": True
 
-    #         },
-    #         "company_size": {"present": False},
-    #         "financial_criteria": {"present": False},
-    #         "legal_criteria": {"present": True, "headquarters": True}
-    #     },
-    #     "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
-    # },
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"count_legal": {"op": ">", "value": 3000}, "count_semantic": {"op": ">", "value": 30}}
+    },
      {
         "name": "Test 26 - display Activités NAF multiples avec e-sport",
         "criteria": {
@@ -661,10 +662,88 @@ test_cases = [
         "expected": {"count_legal": {"op": ">", "value": 3}, "count_semantic": {"op": ">", "value": 30}}
     },
 
+     {
+        "name": "Test 27 - check_siren_get_id siren OK",
+        "url_end_point": "check_siren_build_file_V1",
+        "siren": "839513827",  
+        "billing_post_code":"92250",
+        "billing_address":"9 bis avenue Joffre",
+        "billing_full_name" :"Charles-Antoine d'HOOP",
+        "company":"markethings",
+        "file_price":"100",
+        "billing_city":"La Garenne Colombes",
+        "criteria": {
+            "execution_mode": {"present": True, "output_type": "big_file"},
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": ["23"],
+                "post_code": None,
+                "city": None
+            },            
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "e-sport",
+                "semantic_count_requested": True
+
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"exists": True}
+    },
+
+     {
+        "name": "Test 28 - check_siren_get_id siren KO",
+        "url_end_point": "check_siren_build_file_V1",
+        "siren": "11111111",  
+        "billing_post_code":"92250",
+        "billing_address":"9 bis avenue Joffre",
+        "billing_full_name" :"Charles-Antoine d'HOOP",
+        "criteria": {
+            "execution_mode": {"present": True, "output_type": "big_file"},
+            "location": {
+                "present": True,
+                "region": None,
+                "departement": ["23"],
+                "post_code": None,
+                "city": None
+            },            
+            "activity": {
+                "present": True,
+                "activity_codes_list": ["9319Z"],
+                "original_activity_request": "e-sport",
+                "semantic_count_requested": True
+
+            },
+            "company_size": {"present": False},
+            "financial_criteria": {"present": False},
+            "legal_criteria": {"present": True, "headquarters": True}
+        },
+        "expected": {"exists": False}
+    },
+
+
+    {
+        "name": "Test 29 - purchase_success_V1",
+        "url_end_point": "purchase_success_V1",
+        "stripe_id": "d3ca786c70a1ec064e0e",
+        "email_client": "charles-antoine@markethings.io",
+        "card_owner":"d'HOOP",
+        "expected": {"success": True}
+    }
+
 
 ]
 
-BLACK_LIST_TESTS = ["25"]
+print("length testcase")
+print(len(test_cases))
+
+BLACK_LIST_TESTS        = ["20","21","22","23","25"]
+EXCLUSION_LIST_TESTS    = [27,28,29]
+ENGINE_TEST_LIST        = ["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26"]
 
 def compare(actual, operator, expected):
     if operator == "==":
@@ -705,28 +784,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run API bot tests")
     parser.add_argument('--server', required=True, help='Server address')
     parser.add_argument('test_numbers', nargs='?', help='Test numbers to replay, e.g., 1-5-12')
+
     return parser.parse_args()
-
-args = parse_args()
-
-# Convert test_numbers to list of integers
-test_numbers = None  # None = run all tests
-
-print(args.test_numbers.lower())
-if args.test_numbers:
-    if args.test_numbers.lower() == "all":
-        test_numbers = None
-    else:
-        try:
-            test_numbers = [int(x) for x in args.test_numbers.split('-')]
-        except ValueError:
-            print('Invalid format. Use "all", a number, or numbers separated by "-" (e.g. 1-5-12)')
-            exit(1)
-# Use the arguments
-server = args.server
-print("Server:", server)
-print("Test numbers to replay:", test_numbers)
-
 
 def test_api(test_case):
 
@@ -780,20 +839,82 @@ def test_api(test_case):
             "X-Signature": signature
         }
     try:
-        response = requests.post(
-            API_URL,
-            json=test_case["criteria"],
-            headers=headers,
-            timeout=60
-        )
-        return {
-            "test_name": test_case["name"],
-            "status_code": response.status_code,
-            "request": test_case["criteria"],
-            "response": response.json() if response.status_code == 200 else {"error": response.text},
-            "success": response.status_code == 200
-        }
+       
+        flag_url_end_point = False
+        try:
+            url_end_point = test_case['url_end_point']
+            flag_url_end_point = True
+        except: 
+            flag_url_end_point = False
 
+        
+        if not flag_url_end_point:
+            response = requests.post(
+                API_URL,
+                json=test_case["criteria"],
+                headers=headers,
+                timeout=60
+            )
+            return {
+                "test_name": test_case["name"],
+                "status_code": response.status_code,
+                "request": test_case["criteria"],
+                "response": response.json() if response.status_code == 200 else {"error": response.text},
+                "success": response.status_code == 200
+            }
+        elif url_end_point == "check_siren_build_file_V1":
+            # Préparation du corps de la requête (Payload)
+            # On combine le nom, le siren et les critères dans un seul dictionnaire
+            payload = {
+                "siren": test_case["siren"],
+                "billing_post_code":test_case["billing_post_code"],
+                "billing_address":test_case["billing_address"],
+                "billing_full_name" :test_case["billing_full_name"],
+                "file_price" :test_case["file_price"],
+                "company" :test_case["company"],
+                "billing_city":test_case["billing_city"],
+                "criteria": test_case["criteria"]
+            }
+            
+            response = requests.post(
+                API_URL_CHECK_SIREN_GET_ID,
+                json=payload,
+                headers=headers,
+                timeout=60
+            )
+            return {
+                "test_name": test_case["name"],
+                "status_code": response.status_code,
+                "request": test_case["criteria"],
+                "response": response.json() if (response.status_code == 200 or response.status_code == 404) else {"error": response.text},
+                "success": (response.status_code == 200 or response.status_code == 404)
+            }
+
+        elif url_end_point == "purchase_success_V1":
+            print("purchase_success_V1 payment")
+            # Préparation du corps de la requête (Payload)
+            # On combine le nom, le siren et les critères dans un seul dictionnaire
+            payload = {
+                "stripe_id": test_case["stripe_id"],
+                "email_client": test_case["email_client"],
+                "card_owner": test_case['card_owner']
+
+            }
+            
+            response = requests.post(
+                API_CONFIRM_PAYMENT,
+                json=payload,
+                headers=headers,
+                timeout=60
+            )
+            print(response)
+            return {
+                "test_name": test_case["name"],
+                "status_code": response.status_code,
+                "response": response.json() if (response.status_code == 200) else {"error": response.text},
+                "success": (response.status_code == 200)
+            }
+            
     except requests.exceptions.ConnectionError:
         return {
             "test_name": test_case["name"],
@@ -830,11 +951,16 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
     
     # Determine which tests to run
+    print("test_numbers")
+    print(test_numbers)
+    print(len(test_cases))
+
     if test_numbers:
         tests_to_run = []
         for n in test_numbers:  
-            #print(n)
+            #print(str(n))
             if str(n) in BLACK_LIST_TESTS:
+                print("bypass")
                 continue
             if 1 <= n <= len(test_cases):
                 tests_to_run.append((n, test_cases[n - 1]))
@@ -853,81 +979,51 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
 
         start_time = time.perf_counter()
         result = test_api(test_case)
+
+        if VERBOSE == "yes":
+            print("result")
+            print(result)
         end_time = time.perf_counter()
         duration = end_time - start_time
 
-        try:
-            results.append(result)
+        #try:
+        results.append(result)
+        response = result.get('response', {})
 
-            response = result.get('response', {})
-
-            if 'error' in response:   
-                print(response) 
-                business_ok = False
-                tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
-                tab_errors.append(test_case)  
+        if 'error' in response:   
+            business_ok = False
+            tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
+            tab_errors.append(test_case)  
 
 
-            # 1. Extraction du lien de fichier (depuis le JSON imbriqué dans 'file_link')
-            file_info = {}
+        # 1. Extraction du lien de fichier (depuis le JSON imbriqué dans 'file_link')
+        file_info = {}
 
-             # 2. On récupère la donnée brute (qui est un str selon l'erreur)
-            raw_company_info = response.get('company_info_legal', '{}')
+         # 2. On récupère la donnée brute (qui est un str selon l'erreur)
+        raw_company_info = response.get('company_info_legal', '{}')
 
-            raw_count_legal = response.get('count_legal')
+        raw_count_legal = response.get('count_legal')
 
-            raw_file_link_info = response.get('file_link', '{}')
+        raw_file_link_info = response.get('file_link', '{}')
 
-           
-            if isinstance(raw_file_link_info, str) and raw_file_link_info != "{}" and raw_file_link_info.strip() != "":
-                try:
-                    file_info = json.loads(raw_file_link_info)
-                except json.JSONDecodeError:
-                    print("Erreur : file_link n'est pas un JSON valide")
-                    file_info = {}
+        raw_siren_exists = response.get('exists', '{}')
+        # print(f"raw_siren_exists:{raw_siren_exists}")
+        # print(raw_siren_exists !=  {})
+        # print(f"raw_count_legal:{raw_count_legal}")
+        if raw_siren_exists == False or raw_siren_exists == True: 
+            try:
+                #print(f"******************response:{response}")
+                test_exists     = response.get('exists', '{}')
+                test_stripe_id  = response.get('stripe_id', '{}')
+                expected        = test_case.get("expected", {})
+                expected_exists = expected['exists']
+                # print(f"expected_exists:{expected_exists}")
+                # print(f"test_exists:{test_exists}")
+                if expected_exists == test_exists:
+                    business_ok = True
 
-                # 2. Récupération des métadonnées
-                metadata = file_info.get("metadata", {})
-                file_url = metadata.get("file_link", "")
-                total_found = metadata.get("total_found", 0)
-
-                # 3. Test de la taille du fichier si demandé dans les "expected"
-                expected = test_case.get("expected", {})
-                file_size_rule = expected.get("file_size")
-
-                file_size_ok = True  # ✅ True by default if no rule
-                actual_size = None
-                operator = None
-                expected_value = None
-
-                if isinstance(file_size_rule, dict) and file_url:
-                    operator = file_size_rule.get("op")
-                    expected_value = file_size_rule.get("value")
-
-                    # Extraction du nom du fichier
-                    file_name = file_url.split("/")[-1]
-                    local_path = f"./customer_files/{file_name}"
-
-                    if os.path.exists(local_path):
-                        actual_size = os.path.getsize(local_path)
-
-                        try:
-                            file_size_ok = compare(actual_size, operator, expected_value)
-                        except ValueError as e:
-                            print(f"Erreur : {e}")
-                            file_size_ok = False
-
-                        if not file_size_ok:
-                            print(
-                                f"ÉCHEC : Taille fichier {actual_size} "
-                                f"{operator} {expected_value} ❌"
-                            )
-                    else:
-                        print(f"Erreur : Le fichier local {local_path} est introuvable")
-                        file_size_ok = False
-
-                # 4. Mise à jour de la validation globale
-                business_ok = file_size_ok
+                else:
+                    business_ok = False
 
                 if business_ok:
                     print(f"✅ Test '{test_case['name']}' réussi")
@@ -935,105 +1031,169 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
                     print(f"❌ Test '{test_case['name']}' échoué")
                     tab_errors.append(
                         f"test_number:{test_case['name']}; "
-                        f"file_size expected {operator} {expected_value}, "
-                        f"got {actual_size}"
+                        f"test_exists expected {expected_exists}, "
                     )
                     tab_errors.append(test_case)
 
+            except json.JSONDecodeError:
+                print("Erreur : response n'est pas un JSON valide")
+                file_info = {}
 
+        elif isinstance(raw_file_link_info, str) and raw_file_link_info != "{}" and raw_file_link_info.strip() != "":
+            try:
+                file_info = json.loads(raw_file_link_info)
+            except json.JSONDecodeError:
+                print("Erreur : file_link n'est pas un JSON valide")
+                file_info = {}
 
-            # 2. On vérifie si c'est un string et on convertit
-            elif isinstance(raw_company_info, list):
-                
-                # ÉTAPE 1 : Pas de json.loads, on utilise la liste directement
-                company_info_list = raw_company_info 
+            # 2. Récupération des métadonnées
+            metadata = file_info.get("metadata", {})
+            file_url = metadata.get("file_link", "")
+            total_found = metadata.get("total_found", 0)
 
-                # ÉTAPE 2 : Extraction des SIREN depuis la liste
-                # Puisque chaque élément de la liste est une entreprise avec une clé 'siren'
-                sirens = [item.get('siren') for item in company_info_list if isinstance(item, dict) and 'siren' in item]
+            # 3. Test de la taille du fichier si demandé dans les "expected"
+            expected = test_case.get("expected", {})
+            file_size_rule = expected.get("file_size")
 
-                #print(f"sirens:{sirens}")
-                
-                # ÉTAPE 3 : Logique de validation
-                expected = test_case.get('expected', {})
-                exp_legal_dict = expected.get('count_legal', {})
-                exp_count_legal = exp_legal_dict.get('value', 0)
-                
-                # On vérifie si on a trouvé assez d'entreprises
-                if len(sirens) > exp_count_legal:
-                    business_ok = True
+            file_size_ok = True  # ✅ True by default if no rule
+            actual_size = None
+            operator = None
+            expected_value = None
+
+            if isinstance(file_size_rule, dict) and file_url:
+                operator = file_size_rule.get("op")
+                expected_value = file_size_rule.get("value")
+
+                # Extraction du nom du fichier
+                file_name = file_url.split("/")[-1]
+                local_path = f"./customer_files/{file_name}"
+
+                if os.path.exists(local_path):
+                    actual_size = os.path.getsize(local_path)
+
+                    try:
+                        file_size_ok = compare(actual_size, operator, expected_value)
+                    except ValueError as e:
+                        print(f"Erreur : {e}")
+                        file_size_ok = False
+
+                    if not file_size_ok:
+                        print(
+                            f"ÉCHEC : Taille fichier {actual_size} "
+                            f"{operator} {expected_value} ❌"
+                        )
                 else:
-                    business_ok = False
-                    tab_errors.append(f"test_number:{test_case.get('test_number')}; company info ko expected > {exp_count_legal}, got {len(sirens)}")
-                    tab_errors.append(test_case)
+                    print(f"Erreur : Le fichier local {local_path} est introuvable")
+                    file_size_ok = False
+
+            # 4. Mise à jour de la validation globale
+            business_ok = file_size_ok
+
+            if business_ok:
+                print(f"✅ Test '{test_case['name']}' réussi")
+            else:
+                print(f"❌ Test '{test_case['name']}' échoué")
+                tab_errors.append(
+                    f"test_number:{test_case['name']}; "
+                    f"file_size expected {operator} {expected_value}, "
+                    f"got {actual_size}"
+                )
+                tab_errors.append(test_case)
 
 
-            elif isinstance(raw_count_legal, int):
-                
-                if raw_count_legal != "{}":
 
-                    # --- EXTRACTION ET NETTOYAGE DES VALEURS ---
-                    # On s'assure de récupérer un entier, même si la réponse est un tuple (ex: (123,)) ou une liste [(123,)]
-                    def clean_count(val):
-                        if isinstance(val, (list, tuple)):
-                            if len(val) > 0:
-                                # Si c'est une liste de tuples : [(123,)]
-                                inner = val[0]
-                                return inner[0] if isinstance(inner, tuple) else inner
-                            return 0
-                        return val
+        # 2. On vérifie si c'est un string et on convertit
+        elif isinstance(raw_company_info, list):
+            
+            # ÉTAPE 1 : Pas de json.loads, on utilise la liste directement
+            company_info_list = raw_company_info 
 
-                    count_legal = clean_count(response.get('count_legal'))
-                    count_semantic = clean_count(response.get('count_semantic'))
+            # ÉTAPE 2 : Extraction des SIREN depuis la liste
+            # Puisque chaque élément de la liste est une entreprise avec une clé 'siren'
+            sirens = [item.get('siren') for item in company_info_list if isinstance(item, dict) and 'siren' in item]
 
-                    OPS = {
-                        ">": op.gt,
-                        "<": op.lt,
-                        ">=": op.ge,
-                        "<=": op.le,
-                        "==": op.eq,
-                        "!=": op.ne
-                    }
+            #print(f"sirens:{sirens}")
+            
+            # ÉTAPE 3 : Logique de validation
+            expected = test_case.get('expected', {})
+            exp_legal_dict = expected.get('count_legal', {})
+            exp_count_legal = exp_legal_dict.get('value', 0)
+            
+            # On vérifie si on a trouvé assez d'entreprises
+            if len(sirens) > exp_count_legal:
+                business_ok = True
+            else:
+                business_ok = False
+                tab_errors.append(f"test_number:{test_case.get('test_number')}; company info ko expected > {exp_count_legal}, got {len(sirens)}")
+                tab_errors.append(test_case)
 
-                    # Extract expected values
-                    expected = test_case.get('expected', {})
-                    exp_legal = expected.get('count_legal', {})
-                    exp_semantic = expected.get('count_semantic', {})
 
-                    exp_op_legal = exp_legal.get('op')
-                    exp_value_legal = exp_legal.get('value')
+        elif isinstance(raw_count_legal, int):
+            #print("count_legal")
+            if raw_count_legal != "{}":
 
-                    exp_op_semantic = exp_semantic.get('op')
-                    exp_value_semantic = exp_semantic.get('value')
+                # --- EXTRACTION ET NETTOYAGE DES VALEURS ---
+                # On s'assure de récupérer un entier, même si la réponse est un tuple (ex: (123,)) ou une liste [(123,)]
+                def clean_count(val):
+                    if isinstance(val, (list, tuple)):
+                        if len(val) > 0:
+                            # Si c'est une liste de tuples : [(123,)]
+                            inner = val[0]
+                            return inner[0] if isinstance(inner, tuple) else inner
+                        return 0
+                    return val
 
-                    # ---------- BUSINESS VALIDATION ----------
-                    business_ok = True  # Initialisé à True, passera à False si une erreur survient
+                count_legal = clean_count(response.get('count_legal'))
+                count_semantic = clean_count(response.get('count_semantic'))
 
-                    # Validation Legal
-                    if exp_op_legal and exp_value_legal is not None:
-                        if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
-                            business_ok = False
-                            tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
-                            tab_errors.append(test_case)
+                OPS = {
+                    ">": op.gt,
+                    "<": op.lt,
+                    ">=": op.ge,
+                    "<=": op.le,
+                    "==": op.eq,
+                    "!=": op.ne
+                }
 
-                    # Validation Semantic
-                    if exp_op_semantic and exp_value_semantic is not None:
-                        if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
-                            business_ok = False
-                            tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
-                            tab_errors.append(test_case)
+                # Extract expected values
+                expected = test_case.get('expected', {})
+                exp_legal = expected.get('count_legal', {})
+                exp_semantic = expected.get('count_semantic', {})
 
-        except ValueError as e:
-            print(f"Value error: {e}")
-            tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
-            tab_errors.append(test_case)
-            business_ok = False
+                exp_op_legal = exp_legal.get('op')
+                exp_value_legal = exp_legal.get('value')
+
+                exp_op_semantic = exp_semantic.get('op')
+                exp_value_semantic = exp_semantic.get('value')
+
+                # ---------- BUSINESS VALIDATION ----------
+                business_ok = True  # Initialisé à True, passera à False si une erreur survient
+
+                # Validation Legal
+                if exp_op_legal and exp_value_legal is not None:
+                    if count_legal is None or not OPS[exp_op_legal](count_legal, exp_value_legal):
+                        business_ok = False
+                        tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_legal expected {exp_op_legal} {exp_value_legal}, got {count_legal}")
+                        tab_errors.append(test_case)
+
+                # Validation Semantic
+                if exp_op_semantic and exp_value_semantic is not None:
+                    if count_semantic is None or not OPS[exp_op_semantic](count_semantic, exp_value_semantic):
+                        business_ok = False
+                        tab_errors.append(f"test_number:{test_case['test_number'] if 'test_number' in test_case else 'N/A'}; count_semantic expected {exp_op_semantic} {exp_value_semantic}, got {count_semantic}")
+                        tab_errors.append(test_case)
+
+        # except ValueError as e:
+        #     print(f"Value error: {e}")
+        #     tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
+        #     tab_errors.append(test_case)
+        #     business_ok = False
         
-        except Exception as e:
-            print(f"error Exception: {e}")
-            tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
-            tab_errors.append(test_case)
-            business_ok = False
+        # except Exception as e:
+        #     print(f"error Exception: {e}")
+        #     tab_errors.append(f"test_number:{test_case}; error de bas niveau: {e}")
+        #     tab_errors.append(test_case)
+        #     business_ok = False
 
         success = business_ok
         status = "✓ SUCCÈS" if success else "✗ ÉCHEC"
@@ -1060,15 +1220,16 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
                     else:
                         print(f"    - {code}: {info}")
 
-        # ---------- Full JSON request ----------
-        print("\n  Full request JSON:")
-        print(json.dumps(test_case, indent=2, ensure_ascii=False))
+        if VERBOSE == "yes":
+            # ---------- Full JSON request ----------
+            print("\n  Full request JSON:")
+            print(json.dumps(test_case, indent=2, ensure_ascii=False))
 
-        # ---------- Full JSON response ----------
-        print("\n  Full response JSON:")
-        print(json.dumps(response, indent=2, ensure_ascii=False))
+            # ---------- Full JSON response ----------
+            print("\n  Full response JSON:")
+            print(json.dumps(response, indent=2, ensure_ascii=False))
 
-        print("-" * 80)
+            print("-" * 80)
 
         if success:
             success_count += 1
@@ -1155,22 +1316,70 @@ def main():
     # if not API_KEYS:
     #     raise ValueError("API_KEYS environment variable not set!")
 
+
+    # 1. DÉFINITION DU PARSER (Toujours en premier)
     parser = argparse.ArgumentParser(description="Run API tests or integration")
+
     parser.add_argument(
         "--server",
         type=str,
         required=True,
         help="IP or hostname of the server where the API is running"
     )
+
     parser.add_argument(
-        'test_numbers',
-        nargs='?',
-        help='Test numbers to replay, e.g., 3 or 1-5-12'
+        "--verbose",
+        action="store_true",
+        help="Enable verbose mode"
     )
 
+    parser.add_argument(
+        '--tests',
+        dest='test_numbers',
+        default="all", # Par défaut, on considère "all"
+        help='Test numbers to replay, e.g., "all", "3" or "1-5-12"'
+    )
+
+    global API_URL, API_URL_CHECK_SIREN_GET_ID, API_CONFIRM_PAYMENT, VERBOSE
+
+    # 2. ANALYSE DES ARGUMENTS
     args = parser.parse_args()
+    VERBOSE = "no"
+    # 3. GESTION DU MODE VERBEUX
+    VERBOSE = "yes" if args.verbose else "no"
+    if args.verbose:
+        print("Verbose mode is ON")
+
+    # 4. CONVERSION DE TEST_NUMBERS EN LISTE D'ENTIERS
+    # On initialise à None (qui signifie "exécuter tous les tests")
+    final_test_list = None 
+
+    if args.test_numbers and args.test_numbers.lower() != "all":
+        try:
+            # On sépare par '-' et on transforme chaque morceau en int
+            test_numbers = [int(x) for x in args.test_numbers.split('-')]
+        except ValueError:
+            print('Error: Invalid format for --tests. Use "all", a number, or "1-5-12".')
+            sys.exit(1)
+
+    if args.test_numbers.lower() == "all":        
+
+        tmp = list(enumerate(test_cases, 1))  # all tests
+        test_numbers = [t[0] for t in tmp]
+
+        print(test_numbers)
+        print(EXCLUSION_LIST_TESTS)
+        test_numbers = list(set(test_numbers) - set(EXCLUSION_LIST_TESTS))
+        print(f"test_numbers:{test_numbers}")
+    # 5. ASSIGNATION FINALE
     server_ip = args.server
 
+    # 6. AFFICHAGE DE CONTRÔLE
+    # print(f"--- Configuration ---")
+    # print(f"Server IP: {server_ip}")
+    # print(f"Verbose  : {VERBOSE}")
+    # print(f"Tests to run: {test_numbers if final_test_list else 'ALL'}")
+    # print(f"---------------------")
     # # Convert test_numbers to list of integers
     # test_numbers = []
     # if args.test_numbers:
@@ -1181,14 +1390,16 @@ def main():
     #         exit(1)
 
     # Example: construct API URL dynamically
-    global API_URL
     if VERSION == "V2":
         API_URL = f"http://{server_ip}:5001/count_bot_v2"
     elif VERSION == "V1":
         API_URL = f"http://{server_ip}:5001/count_bot_v1"
+        API_URL_CHECK_SIREN_GET_ID  = f"http://{server_ip}:5001/check_siren_build_file_V1"
+        API_CONFIRM_PAYMENT         = f"http://{server_ip}:5001/purchase_success_V1"
 
-    print(f"Using API URL: {API_URL}")
-    print(f"Test numbers to replay: {test_numbers}")
+
+    # print(f"Using API URL: {API_URL}")
+    # print(f"Test numbers to replay: {test_numbers}")
 
     # Run tests (pass test_numbers to filter if needed)
     results, errors = run_all_tests(test_numbers=test_numbers)

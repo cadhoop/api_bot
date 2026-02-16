@@ -23,9 +23,19 @@ from openpyxl.utils import get_column_letter
 import math
 import argparse
 import psutil
+import secrets
+import threading
+import paramiko
+from pathlib import Path
+from fpdf import FPDF
+from PIL import Image
+from fpdf.enums import XPos, YPos
+import traceback
 
 
-from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT
+
+from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT, PATH_REMOTE_OVH, LINK_REMOTE_OVH, SFTP_NAME,SFTP_PORT,SFTP_USERNAME,SFTP_PASSWORD,PATH_REMOTE_DATA_FILE,PATH_REMOTE_INVOICE_FILE,PATH_LOCAL_INVOICE_FILE,PATH_LOCAL_DATA_FILE, PATH_LOGO_MARKETHINGS_EKIMIA, PATH_LOGO_MARKETHINGS_IKOULA3
+
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
@@ -33,7 +43,7 @@ app.config['JSON_AS_ASCII'] = False
 # Empêche Flask de trier les clés alphabétiquement
 app.json.sort_keys = False
 
-# nohup python3 API_bot_integration.py > app.log 2>&1 &
+# nohup python3 API_bot_integration.py --verbose="no" > app.log 2>&1 &
 
 
 # 1. Initialiser le parseur
@@ -52,14 +62,18 @@ if args.verbose == "yes":
     print("--- MODE VERBOSE ACTIVÉ ---")
     print(f"Arguments reçus : {args}")
     VERBOSE = True
+    
+FPDF_VERSION = 2
 
 
 hostname = socket.gethostname()
 if hostname == "frhb96148ds":
     DB_CONFIG = DB_CONFIG_ikoula3
+    PATH_LOGO_MARKETHINGS = PATH_LOGO_MARKETHINGS_IKOULA3
+
 elif hostname == "dhoop-NS5x-NS7xAU":
     DB_CONFIG = DB_CONFIG_ekima
-
+    PATH_LOGO_MARKETHINGS = PATH_LOGO_MARKETHINGS_EKIMIA
 
 
 logger = logging.getLogger()
@@ -155,7 +169,16 @@ elif hostname == "dhoop-NS5x-NS7xAU":
 # Mapping des champs API vers les champs de la base de données
 
 
+# === CHECK SIREN===
 
+def check_siren_in_db(siren, conn):
+    cursor = conn.cursor()
+    
+    # On compte combien de fois le SIREN apparaît
+    cursor.execute(f"SELECT 1 FROM {TABLE_FAST} WHERE siren = %s LIMIT 1", (siren,))
+    result = cursor.fetchone()
+    
+    return result is not None # Retourne True si trouvé, sinon False
 
 
 # === CHARGEMENT DU RÉFÉRENTIEL INSEE ===
@@ -279,6 +302,8 @@ def get_db_connection():
         conn = mysql.connector.connect(**DB_CONFIG)
         return conn
     except Error as e:
+        logger.exception(f"Erreur de connexion à Mysql")
+
         print(f"Erreur de connexion à MySQL: {e}")
         raise
 
@@ -920,7 +945,6 @@ def require_api_key_v1(func):
         # Try X-Api-Key first
         api_key = headers.get("x-api-key")
 
-        #print(f"api_key:{api_key}")
         # Fallback to Authorization header: Bearer <token>
         if not api_key:
             auth_header = headers.get("authorization")
@@ -1146,6 +1170,8 @@ def count_companies_logic(criteria: dict):
             #print(f"ip_address:{ip_address}")
             insert_api_log(timestamp, criteria, duration, response, ip_address)
         except Exception:
+            logger.exception(f"Erreur insertion API log")
+
             pass
 
 
@@ -1219,36 +1245,28 @@ def get_company_info(list_siren, origin_label):
         conn.close()
 
 
-def get_company_file(criteria, list_siren):
+def get_company_file(file_link, file_path, criteria, list_siren, stripe_id):
     #print(f"Critéres reçus : {criteria}")
     
     
     # On récupère les champs dans execution_mode
 
     exec_mode = criteria.get('execution_mode', {})
-    raw_email = exec_mode.get('email_address', 'inconnu')
+    #raw_email = exec_mode.get('email_address', 'inconnu')
 
     #print(f"exec_mode:{exec_mode}")
     web_email_req = exec_mode.get('web_site_email_requested', False)
     web_phone_req = exec_mode.get('web_site_phone_requested', False)
-    #print(f"web_email_req:{web_email_req}")
-    #print(f"web_phone_req:{web_phone_req}")
+    # print(f"web_email_req:{web_email_req}")
+    # print(f"web_phone_req:{web_phone_req}")
 
-    # On nettoie l'email (remplacement des caractères spéciaux par des underscores)
-    clean_email = re.sub(r'[^a-zA-Z0-9]', '_', raw_email)
-    
-    # 2. Génération du Timestamp (format: 20240522_143005)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # 3. Construction du nom de fichier dynamique
-    file_name = f"export_{clean_email}_{timestamp}.xlsx"
-    #print(file_name)
-    file_path = f"./customer_files/{file_name}"
+   
 
     # Initialisation pour éviter les UnboundLocalError
     output = {"metadata": {"total_found": 0, "file_link": None}}
     # Assurez-vous que ce dossier existe sur votre serveur
-    
+    #print(f"file_name:{file_name}")
+
     conn = None
     cursor = None
 
@@ -1256,10 +1274,10 @@ def get_company_file(criteria, list_siren):
         conn = get_db_connection()
         # dictionary=True est crucial pour que Pandas transforme les lignes en colonnes
         cursor = conn.cursor(dictionary=True)
-
+        
         # 1. Extraction de la liste de SIREN
         if isinstance(list_siren, dict):
-            list_siren = list_siren.get('results', [])
+            list_siren = list_siren.get('siren_list', [])
 
         if not list_siren:
             return json.dumps({"metadata": {"total_found": 0, "file_link": None}})
@@ -1279,6 +1297,8 @@ def get_company_file(criteria, list_siren):
                 WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui'  AND Best_Email like '%@%'
             """
         elif (web_phone_req and not web_email_req):
+            #print("web_phone_req and not web_email_req")
+
             # 2. Requête SQL avec telephone
             sql = f"""
                 SELECT 
@@ -1292,6 +1312,8 @@ def get_company_file(criteria, list_siren):
 
         elif (web_email_req and web_phone_req):
             # 2. Requête SQL avec telephone
+            #print("web_email_req and web_phone_req")
+
             sql = f"""
                 SELECT 
                     siren, Commune, Code_postal, Departement, Region, 
@@ -1303,6 +1325,7 @@ def get_company_file(criteria, list_siren):
             """
         else:
             # 2. Requête SQL
+            #print("not web_email_req and not web_phone_req")
             sql = f"""
                 SELECT 
                     siren, Commune, Code_postal, Departement, Region, 
@@ -1312,6 +1335,9 @@ def get_company_file(criteria, list_siren):
                 FROM {TABLE_ALL}
                 WHERE siren IN ({placeholders}) AND Siege_entreprise = 'oui' 
             """
+
+        if VERBOSE == "yes":
+            print(f"sql:{sql}")
 
         # 3. Exécution
         cursor.execute(sql, tuple(list_siren)) 
@@ -1365,20 +1391,20 @@ def get_company_file(criteria, list_siren):
                 ws_setup.column_dimensions['B'].width = 15
                 ws_setup.column_dimensions['C'].width = 80
 
-            file_link = f"https://www.markethings.io/customer_files/{file_name}"
         else:
             file_link = None
 
         output = {
             "metadata": {
-                "total_found": len(rows),
-                "file_link": file_link
+                "total_found": len(rows)
             }
         }
 
     except Exception as e:
-        print(f"Erreur lors de la génération du fichier : {e}")
+        if VERBOSE == "yes":
+            print(f"Erreur lors de la génération du fichier : {e}")
         output = {"error": True, "message": str(e), "metadata": {"total_found": 0, "file_link": None}}
+        logger.error(f"Erreur lors de la génération du fichier : {e}")
 
     finally:
         if cursor:
@@ -1430,6 +1456,8 @@ def trafic_control(f):
                 }), 429 
 
         except Exception as e:
+            logger.exception(f"Database error: {e}")
+
             # It's good practice to log the error so you know if the DB fails
             print(f"Database error: {e}")
             # Decide if you want to block or allow if the DB is down
@@ -1473,7 +1501,6 @@ def query_control(f):
         # 4. Check against your parameter list
         if final_check_word in TAB_MOTS_SUP100000_SANS_ACCENT:
             logger.exception(f"{MESSAGE_WORD_TOO_COMMON_1} {final_check_word} {MESSAGE_WORD_TOO_COMMON_2}")
-            print("")
             return jsonify({
                 "status": "denied",
                 "message": f"{MESSAGE_WORD_TOO_COMMON_1} {final_check_word} {MESSAGE_WORD_TOO_COMMON_2}"
@@ -1494,7 +1521,8 @@ def memory_guard(f):
             # Log this internally so you know the server is under stress
             logger.exception(f"CRITICAL: Memory usage at {current_usage}%! Blocking request.")
 
-            print(f"CRITICAL: Memory usage at {current_usage}%! Blocking request.")
+            if VERBOSE == "yes":
+                print(f"CRITICAL: Memory usage at {current_usage}%! Blocking request.")
             
             return jsonify({
                 "status": "denied",
@@ -1503,6 +1531,765 @@ def memory_guard(f):
 
         return f(*args, **kwargs)
     return decorated_function
+
+
+def insert_stripe_id_file_link_criteria(new_stripe_id, file_price, billing_post_code, billing_address, billing_city, billing_full_name, local_data_file, data_file_link, company, siren, criteria, conn):
+
+    try:
+        cursor = conn.cursor()
+        
+        # Requête paramétrée pour la sécurité
+
+        # doc Convertir le dict en chaîne JSON
+        criteria_json_string = json.dumps(criteria)
+        sql = "INSERT INTO billing_stripe SET stripe_id = %s, file_price = %s, criteres_json = %s, billing_post_code = %s, billing_address = %s, billing_city = %s, billing_full_name = %s, company = %s, siren = %s, local_data_file = %s,  data_file_link = %s" 
+        cursor.execute(sql, (new_stripe_id, file_price, criteria_json_string, billing_post_code, billing_address, billing_city, billing_full_name, company, siren, local_data_file,  data_file_link))
+        
+        conn.commit()
+        #print(f"✅ insert ID, criteria and file_link: {stripe_id}")
+        
+    except mysql.connector.Error as err:
+        if VERBOSE == "yes":
+            print(f"❌ Erreur : {err}")
+        logger.exception(f"Erreur insertion données de facturation:{err}")
+
+    finally:
+        cursor.close()
+
+def get_invoice_number(stripe_id_value, conn):
+
+    
+    purchase_timestamp  = datetime.now()
+
+    try:
+        cursor = conn.cursor()
+        
+        sql = "INSERT INTO invoice_number (purchase_timestamp, stripe_id) VALUES (%s, %s)"
+        params = (purchase_timestamp, str(stripe_id_value))
+        
+       
+        cursor.execute(sql, params)
+        
+        conn.commit()
+        
+        new_invoice_id = cursor.lastrowid
+        if VERBOSE == "yes":
+            print(f"✅ Ligne insérée. Facture n° : {new_invoice_id}")
+
+    except mysql.connector.Error as err:
+        if VERBOSE == "yes":
+            print(f"❌ Erreur lors de l'insertion : {err}")
+        conn.rollback() # Annule en cas d'erreur
+        logger.exception(f"Erreur génération numero de facture:{err}")
+
+    finally:
+        cursor.close()
+    return new_invoice_id
+
+def update_payment_invoice(stripe_id, invoice_file_link, conn):
+
+    cursor = None # Initialisation pour éviter l'erreur dans le finally
+    try:  
+        cursor = conn.cursor()
+
+        query = """
+            UPDATE billing_stripe 
+            SET invoice_file_link = %s
+            WHERE stripe_id = %s
+        """
+        timestamp = datetime.now()
+
+        # Attention : utilisez bien email_client (le nom de votre argument)
+        cursor.execute(query, (invoice_file_link, stripe_id),)
+        
+        conn.commit()
+        
+        rows_affected = cursor.rowcount
+        return rows_affected > 0
+        
+    except mysql.connector.Error as err:
+        logger.exception(f"Erreur update_payment_invoice:{err}")
+
+        if VERBOSE == "yes":
+            print(f"Erreur : {err}")
+        return False
+    finally:
+        # Le finally s'exécute QUOI QU'IL ARRIVE (succès ou erreur)
+        if cursor:
+            cursor.close()
+
+def update_payment_info_email(stripe_id, email_client, card_owner, conn):
+    #print("update_payment_info_email_get_data_files_link")
+    cursor = None # Initialisation pour éviter l'erreur dans le finally
+    try:  
+        cursor = conn.cursor()
+
+        query = """
+            UPDATE billing_stripe 
+            SET purchase_timestamp = %s, customer_email = %s, card_owner = %s
+            WHERE stripe_id = %s
+        """
+        timestamp = datetime.now()
+
+        # Attention : utilisez bien email_client (le nom de votre argument)
+        cursor.execute(query, (timestamp, email_client, card_owner, stripe_id),)
+        
+        conn.commit()
+        
+        rows_affected = cursor.rowcount
+        return rows_affected > 0
+        
+    except mysql.connector.Error as err:
+        logger.exception(f"Erreur update info payment:{err}")
+
+        if VERBOSE == "yes":
+            print(f"Erreur : {err}")
+        return False
+    finally:
+        # Le finally s'exécute QUOI QU'IL ARRIVE (succès ou erreur)
+        if cursor:
+            cursor.close()
+
+# doc this function check that data file has been generated
+def check_data_file_ready(stripe_id):
+
+    #print(f"PATH_LOCAL_DATA_FILE:{PATH_LOCAL_DATA_FILE}")
+    directory_to_search = Path(PATH_LOCAL_DATA_FILE)
+    search_term         = stripe_id  # Votre identifiant hexa de 20 car.
+
+    if VERBOSE == "yes":
+        print(f"Recherche du fichier pour le stripe_id: {search_term}")
+
+    flag_present = False
+    # .rglob cherche récursivement
+    # On utilise *{search_term}* pour trouver le terme n'importe où dans le nom
+    for file_path in directory_to_search.rglob(f"*{search_term}*"):
+        if file_path.is_file():
+            if VERBOSE == "yes":
+                print(f"✅ Fichier trouvé : {file_path.name}")
+                print(f"Chemin complet : {file_path.absolute()}")
+            flag_present = True
+            break  
+    if not flag_present:
+        logger.error(f"❌ Aucun fichier correspondant trouvé.")
+        if VERBOSE == "yes":
+            print("❌ Aucun fichier correspondant trouvé.")
+    return flag_present
+           
+
+def wait_for_data_file(stripe_id, conn):
+    """
+    Boucle de vérification du fichier pendant 'timeout' secondes.
+    """
+    start_time = time.time()
+    
+    if VERBOSE == "yes":
+        print(f"⏳ Attente de la production du fichier pour {stripe_id}...")
+
+    while True:
+        # 1. On appelle votre fonction de vérification
+        if check_data_file_ready(stripe_id):
+            if VERBOSE == "yes":
+                print("✅ Fichier détecté !")
+            return True  # Succès, on sort de la fonction
+        
+        # 2. Vérification du temps écoulé
+        elapsed_time = time.time() - start_time
+        if elapsed_time > TIME_OUT_DATA_FILE_PRODUCTION:
+            logger.error(f"❌ Erreur : Temps d'attente dépassé ({timeout}s")
+            if VERBOSE == "yes":
+                print(f"❌ Erreur : Temps d'attente dépassé ({timeout}s)")
+            return False  # Timeout atteint, on sort avec un échec
+        
+        # 3. Pause courte avant la prochaine tentative (pour ne pas saturer le CPU/Disque)
+        time.sleep(0.5)
+
+# doc this function get data_file_link info
+def get_data_file_link(stripe_id, conn):
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        
+        # Sélection du champ spécifique
+        query = "SELECT local_data_file, data_file_link  FROM billing_stripe WHERE stripe_id = %s"
+        cursor.execute(query, (stripe_id,))
+        
+        result = cursor.fetchone()
+        
+        # result est un tuple (valeur,), on retourne l'index 0
+        if result:
+            return result[0], result[1]
+        return None, None
+
+    except mysql.connector.Error as err:
+        logger.exception(f"❌ Erreur lors de la récupération du lien : {err}")
+
+        if VERBOSE == "yes":
+            print(f"Erreur lors de la récupération du lien : {err}")
+
+        return None, None
+    finally:
+        if cursor:
+            cursor.close()
+
+
+
+def push_delivery_files(local_data_file, data_remote_file_with_email_path, invoice_local_file, invoice_remote_file_path ):
+    if VERBOSE == "yes":
+        print(f"🚀 Début du transfert SFTP : {local_path}")
+    transport = None
+    try:
+        # print(f"SFTP_USERNAME:{SFTP_USERNAME}")
+        # print(f"SFTP_PASSWORD:{SFTP_PASSWORD}")
+        # 1. Établir la connexion de transport
+        transport = paramiko.Transport((SFTP_NAME, SFTP_PORT))
+        transport.connect(username=SFTP_USERNAME, password=SFTP_PASSWORD)
+
+        # 2. Créer le client SFTP à partir du transport
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        # 3. Envoyer le fichier data (Local -> Distant)
+        # print("*************** totototot")
+        # print(f"local_data_file:{local_data_file}")
+        # print(f"data_remote_file_with_email_path:{data_remote_file_with_email_path}")
+        sftp.put(local_data_file, data_remote_file_with_email_path)
+        
+
+        # 4. Envoyer le fichier data (Local -> Distant)
+        # print("*************** titititi")
+        # print(f"invoice_local_file:{invoice_local_file}")
+        # print(f"invoice_remote_file_path:{invoice_remote_file_path}")
+        sftp.put(invoice_local_file, invoice_remote_file_path)
+        
+        if VERBOSE == "yes":
+            print(f"✅ Fichier envoyé avec succès vers {remote_path}")
+        sftp.close()
+        return True
+
+    except Exception as err:
+        logger.exception(f"❌ Erreur SFTP: {err}")
+
+        if VERBOSE == "yes":
+            print(f"❌ Erreur SFTP : {e}")
+        return False
+    finally:
+        if transport:
+            transport.close()
+    return status_push_delivery_files
+
+
+def prepare_logo_for_pdf(logo_path):
+    """
+    Convertit et optimise une image pour FPDF
+    """
+    import os
+    from PIL import Image
+    
+    if not os.path.exists(logo_path):
+        logger.exception(f"❌ Logo introuvable : {logo_path}")
+        return None
+    
+    try:
+        # Ouvrir l'image
+        img = Image.open(logo_path)
+        #print(f"📸 Image originale : {img.format}, {img.size}, {img.mode}")
+        
+        # ✅ Convertir RGBA → RGB (enlever la transparence)
+        if img.mode == 'RGBA':
+            #print("🔄 Conversion RGBA → RGB")
+            # Créer un fond blanc
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])  # Utiliser le canal alpha comme masque
+            img = background
+        elif img.mode != 'RGB':
+            #print(f"🔄 Conversion {img.mode} → RGB")
+            img = img.convert('RGB')
+        
+        # ✅ Redimensionner (max 2000px de large)
+        max_width = 2000
+        if img.width > max_width:
+            ratio = max_width / img.width
+            new_size = (max_width, int(img.height * ratio))
+            #print(f"🔄 Redimensionnement : {img.size} → {new_size}")
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # ✅ Sauvegarder en PNG optimisé
+        temp_logo = "/tmp/logo_optimized_for_pdf.png"
+        img.save(temp_logo, "PNG", optimize=True)
+        
+        # Vérifier le résultat
+        file_size = os.path.getsize(temp_logo)
+        if VERBOSE == "yes":
+            print(f"✅ Logo optimisé : {temp_logo} ({file_size} octets)")
+        
+        return temp_logo
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur lors de la préparation du logo : {e}")
+        traceback.print_exc()
+        return None
+
+
+class ProfessionalInvoice(FPDF):
+    """Classe personnalisée pour créer des factures professionnelles"""
+    
+    # Palette de couleurs professionnelle
+    COLOR_PRIMARY = (41, 128, 185)      # Bleu professionnel
+    COLOR_SECONDARY = (52, 73, 94)      # Gris foncé
+    COLOR_ACCENT = (231, 76, 60)        # Rouge pour montants
+    COLOR_LIGHT_GRAY = (236, 240, 241)  # Gris clair pour arrière-plans
+    COLOR_TEXT = (44, 62, 80)           # Texte principal
+    
+    def __init__(self):
+        super().__init__()
+        self.set_auto_page_break(auto=True, margin=15)
+    
+    def header_with_logo(self, logo_path=None, company_info=None):
+        """En-tête professionnel avec logo et informations entreprise"""
+        
+        # Bande de couleur en haut
+        self.set_fill_color(*self.COLOR_PRIMARY)
+        self.rect(0, 0, 210, 5, 'F')
+        
+        # Logo à gauche
+        if logo_path and os.path.exists(logo_path):
+            try:
+                optimized_logo = self.optimize_image(logo_path)
+                if optimized_logo:
+                    self.image(optimized_logo, x=10, y=10, w=50)
+            except Exception as e:
+                print(f"⚠️ Erreur logo : {e}")
+        
+        # Informations entreprise à droite
+        if company_info:
+            self.set_xy(120, 10)
+            self.set_font("Helvetica", "B", 10)
+            self.set_text_color(*self.COLOR_SECONDARY)
+            
+            # if 'company_name' in company_info:
+            #     self.cell(0, 5, company_info['company_name'], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+            if 'address' in company_info:
+                self.set_font("Helvetica", "", 9)
+                self.set_x(120)
+                self.cell(0, 5, company_info['address'], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+            if 'city' in company_info:
+                self.set_x(120)
+                self.cell(0, 5, company_info['city'], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+            if 'phone' in company_info:
+                self.set_x(120)
+                self.cell(0, 5, f"Tel : {company_info['phone']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+            if 'email' in company_info:
+                self.set_x(120)
+                self.set_text_color(*self.COLOR_PRIMARY)
+                self.cell(0, 5, company_info['email'], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+        
+        self.ln(10)
+    
+    def add_invoice_title(self, invoice_number, invoice_date):
+        """Ajout des dates de facturation et de livraison l'une en dessous de l'autre"""
+        self.ln(5)
+        
+        # Titre FACTURE
+        self.set_fill_color(*self.COLOR_PRIMARY)
+        self.set_text_color(255, 255, 255)
+        self.set_font("Helvetica", "B", 22)
+        
+        title = "FACTURE"
+        title_width = 60
+        self.set_x((210 - title_width) / 2)
+        self.cell(title_width, 12, title, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C', fill=True)
+        
+        self.ln(5)
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(*self.COLOR_SECONDARY)
+        
+        # --- BLOC DATES (Aligné à droite) ---
+        
+        # 1. Ligne du Numéro et Date de Facturation
+        self.set_x(15)
+        self.cell(90, 6, f"N° Facture : {invoice_number}", align='L')
+        # On place la date de facturation à droite
+        self.cell(90, 6, f"Date de facturation : {invoice_date}", align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        # 2. Ligne Date de Livraison (Juste en dessous)
+        # On ne change pas le X (car on a fait NEXT), on aligne juste à droite
+        self.set_x(15) # On revient au bord gauche
+        self.cell(180, 6, f"Date de livraison : {invoice_date}", align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.ln(5)
+        
+    def add_client_section(self, client_info):
+        """Section client avec encadré"""
+        self.set_fill_color(*self.COLOR_LIGHT_GRAY)
+        self.rect(15, self.get_y(), 180, 35, 'F')
+        
+        # self.set_font("Helvetica", "B", 11)
+        # self.set_text_color(*self.COLOR_PRIMARY)
+        # self.set_x(20)
+        # self.cell(0, 8, "FACTURE", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(*self.COLOR_TEXT)
+        self.set_x(20)
+        self.cell(0, 6, f"Acheteur : {client_info.get('company_name', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.set_font("Helvetica", "", 9)
+        self.set_x(20)
+        self.cell(0, 5, client_info.get('postal_address', ''), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        if 'siret' in client_info:
+            self.set_x(20)
+            self.set_font("Helvetica", "I", 9)
+            self.cell(0, 5, f"SIREN : {client_info['siret']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.ln(10)
+    
+    def add_items_table(self, items):
+        """Tableau avec colonne NATURE (Forfait)"""
+        self.set_fill_color(*self.COLOR_PRIMARY)
+        self.set_text_color(255, 255, 255)
+        self.set_font("Helvetica", "B", 9)
+        
+        # On ajuste les largeurs pour insérer "NATURE"
+        # Total largeur = 180 (de 15 à 195)
+        col_widths = [85, 25, 20, 25, 25] 
+        headers = ["DESCRIPTION", "NATURE", "QTÉ", "P.U. HT", "TOTAL HT"]
+        
+        self.set_x(15)
+        for i, header in enumerate(headers):
+            self.cell(col_widths[i], 8, header, border=1, align='C', fill=True)
+        self.ln()
+        
+        self.set_text_color(*self.COLOR_TEXT)
+        self.set_font("Helvetica", "", 9)
+        
+        for item in items:
+            self.set_x(15)
+            # Description
+            self.cell(col_widths[0], 8, str(item.get('description', '')[:45]), border=1)
+            # Nature (Forfait en dur ou via data)
+            self.cell(col_widths[1], 8, "Forfait", border=1, align='C')
+            # Quantité
+            self.cell(col_widths[2], 8, str(item.get('quantity', 1)), border=1, align='C')
+            # Prix U
+            self.cell(col_widths[3], 8, f"{item.get('unit_price', 0):.2f}", border=1, align='R')
+            # Total
+            self.cell(col_widths[4], 8, f"{item.get('total', 0):.2f}", border=1, align='R')
+            self.ln()
+        self.ln(5)
+    
+    def add_totals_section(self, subtotal, tax_rate, tax_amount, total):
+        """Section totaux avec mise en valeur"""
+        
+        x_start = 130
+        col_label = 40
+        col_value = 30
+        
+        self.set_font("Helvetica", "", 10)
+        self.set_text_color(*self.COLOR_TEXT)
+        
+        # Sous-total HT
+        self.set_x(x_start)
+        self.cell(col_label, 7, "Sous-total HT", align='R')
+        self.cell(col_value, 7, f"{subtotal:.2f} EUR", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+        
+        # TVA
+        self.set_x(x_start)
+        self.cell(col_label, 7, f"TVA ({tax_rate}%)", align='R')
+        self.cell(col_value, 7, f"{tax_amount:.2f} EUR", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R')
+        
+        # Ligne de séparation
+        self.set_draw_color(*self.COLOR_PRIMARY)
+        self.set_line_width(0.5)
+        self.line(x_start, self.get_y() + 2, x_start + col_label + col_value, self.get_y() + 2)
+        self.ln(5)
+        
+        # Total TTC
+        self.set_fill_color(*self.COLOR_PRIMARY)
+        self.set_text_color(255, 255, 255)
+        self.set_font("Helvetica", "B", 12)
+        
+        self.set_x(x_start)
+        self.cell(col_label, 10, "TOTAL TTC", border=1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='R', fill=True)
+        self.set_fill_color(*self.COLOR_ACCENT)
+        self.cell(col_value, 10, f"{total:.2f} EUR", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='R', fill=True)
+        
+        self.ln(10)
+    
+    def add_payment_info(self, payment_info):
+        """Informations de paiement"""
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(*self.COLOR_PRIMARY)
+        self.set_x(15)
+        self.cell(0, 6, "INFORMATIONS DE REGLEMENT", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.set_font("Helvetica", "", 9)
+        self.set_text_color(*self.COLOR_TEXT)
+        
+        if 'method' in payment_info:
+            self.set_x(15)
+            self.cell(0, 5, f"Mode de règlement : {payment_info['method']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        if 'due_date' in payment_info:
+            self.set_x(15)
+            self.cell(0, 5, f"Date d'écheance : {payment_info['due_date']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        if 'iban' in payment_info:
+            self.set_x(15)
+            self.cell(0, 5, f"IBAN : {payment_info['iban']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        if 'bic' in payment_info:
+            self.set_x(15)
+            self.cell(0, 5, f"BIC : {payment_info['bic']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        self.ln(5)
+    
+    def add_footer_legal(self, legal_texts):
+        """Mentions légales en pied de page"""
+        self.set_y(-40)
+        
+        self.set_draw_color(*self.COLOR_PRIMARY)
+        self.set_line_width(0.3)
+        self.line(15, self.get_y(), 195, self.get_y())
+        self.ln(3)
+        
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(100, 100, 100)
+        
+        for text in legal_texts:
+            self.cell(0, 4, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+    
+    @staticmethod
+    def optimize_image(image_path, max_size=(800, 800)):
+        """Optimise une image pour le PDF"""
+        try:
+            img = Image.open(image_path)
+            
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+            temp_path = "/tmp/optimized_logo.jpg"
+            img.save(temp_path, "JPEG", quality=85, optimize=True)
+            
+            return temp_path
+        except Exception as e:
+            print(f"❌ Erreur optimisation image : {e}")
+            return None
+
+
+def generate_professional_invoice(data, output_file):
+    """Génère une facture professionnelle (compatible fpdf2 moderne)"""
+    
+    try:
+        if isinstance(data, str):
+            data = json.loads(data)
+        
+        if VERBOSE == "yes":
+            print("📄 Génération de la facture professionnelle...")
+        
+        pdf = ProfessionalInvoice()
+        pdf.add_page()
+        
+        # 1. En-tête
+        company_info = {
+            'company_name': data.get('company_name', 'Votre Entreprise'),
+            'address': data.get('billing_address', ''),
+            'city': data.get('billing_city', ''),
+            'email': data.get('issuer_email', '')
+        }
+        
+        pdf.header_with_logo(
+            logo_path=data.get('logo_path'),
+            company_info=company_info
+        )
+        
+        # 2. Titre
+        pdf.add_invoice_title(
+            invoice_number=data.get('invoice_number', 'XXXX'),
+            invoice_date=data.get('Date', datetime.now().strftime('%d/%m/%Y'))
+        )
+        
+        # 3. Client
+        client_info = {
+            'company_name': data.get('company_name', ''),
+            'postal_address': data.get('postal_address', ''),
+            'siret': data.get('Siret', '')
+        }
+        pdf.add_client_section(client_info)
+        
+        # 4. Prestations
+        items = []
+        
+        if 'Prestation' in data:
+            prix_ht_str = str(data.get('prix HT', '0'))
+            prix_ht_clean = prix_ht_str.replace('€', '').replace('euros', '').replace('EUR', '').replace('eur', '').replace(',', '.').strip()
+            try:
+                prix_ht_value = float(prix_ht_clean)
+            except ValueError:
+                logger.exception(f"Erreur calcul prix_ht_value")
+                prix_ht_value = 0.0
+            
+            items.append({
+                'description': data['Prestation'],
+                'quantity': 1,
+                'unit_price': prix_ht_value,
+                'total': prix_ht_value
+            })
+        
+        if 'items' in data:
+            items = data['items']
+        
+        pdf.add_items_table(items)
+        
+        # 5. Totaux
+        def parse_price(price_str):
+            if not price_str:
+                return 0.0
+            clean_str = str(price_str).replace('€', '').replace('euros', '').replace('EUR', '').replace('eur', '').replace(',', '.').strip()
+            try:
+                return float(clean_str)
+            except ValueError:
+                logger.exception(f"Calcul des prix")
+                return 0.0
+        
+        prix_ht = parse_price(data.get('prix HT', '0'))
+        tva_amount = parse_price(data.get('TVA 20%', '0'))
+        prix_ttc = parse_price(data.get('Prix TTC', '0'))
+        
+        pdf.add_totals_section(
+            subtotal=prix_ht,
+            tax_rate=20,
+            tax_amount=tva_amount,
+            total=prix_ttc
+        )
+        
+        # 6. Paiement
+        payment_info = {
+            'method': data.get('Réglement', ''),
+            'due_date': data.get('Date du règlement', ''),
+        }
+        pdf.add_payment_info(payment_info)
+        
+        # 7. Mentions légales
+        legal_texts = [
+            data.get('legal_baseline 1', ''),
+            data.get('legal_baseline 2', ''),
+        ]
+        legal_texts = [text for text in legal_texts if text]
+        
+        pdf.add_footer_legal(legal_texts)
+        
+        # Sauvegarder
+        pdf.output(output_file)
+        if VERBOSE == "yes":
+            print(f"✅ Facture professionnelle créée : {output_file}")
+        
+        return True
+        
+    except Exception as e:
+        
+        if VERBOSE == "yes":
+            print(f"❌ generate_professional_invoice : {e}")
+
+        logger.exception(f"Generate_professional_invoice")
+
+        traceback.print_exc()
+        return False
+
+def invoice_edition(stripe_id, conn):
+
+    timestamp                       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp_letter                = datetime.now().strftime("%Y%m%d")
+
+    try:
+        cursor = conn.cursor()
+        
+        # Requête paramétrée pour la sécurité
+
+        sql = "SELECT file_price, billing_post_code, billing_address, billing_full_name, company, siren, billing_city, customer_email  FROM billing_stripe where stripe_id = %s" 
+
+        cursor.execute(sql, (str(stripe_id),))    
+
+        result = cursor.fetchone()
+
+        if result:
+            # Les données sont dans un tuple, dans l'ordre du SELECT
+            file_price_ht     = result[0]
+            billing_post_code = result[1]
+            billing_address   = result[2]
+            billing_full_name = result[3]
+            company_name      = result[4]
+            siren             = result[5]
+            billing_city      = result[6]
+            customer_email    = result[7]
+
+        else:
+            logger.exception(f"Aucune donnée trouvée pour ce stripe_id")
+            
+            return False, None, None
+
+        #print(f"✅ insert ID, criteria and file_link: {stripe_id}")
+        # print(f"file_price_ht:{file_price_ht}")  
+        # print(f"billing_post_code:{billing_post_code}")  
+        # print(f"billing_address:{billing_address}")  
+        # print(f"billing_full_name:{billing_full_name}")  
+        # print(f"company_name:{company_name}")  
+        # print(f"siren:{siren}")  
+        # print(f"billing_city:{billing_city}")  
+        # print(f"customer_email:{customer_email}")  
+
+
+        invoice_file_name               = f"markethings_invoice_{timestamp}_{stripe_id}_{customer_email}"
+        local_invoice_file_path         = f"{PATH_LOCAL_INVOICE_FILE}/{invoice_file_name}"
+        invoice_remote_file_path        = f"{PATH_REMOTE_INVOICE_FILE}/{invoice_file_name}"
+
+
+    except mysql.connector.Error as err:
+        logger.exception(f"Erreur de connexion : invoice_edition")
+    
+    finally:
+        cursor.close()
+
+    invoice_number = get_invoice_number(stripe_id,conn)
+
+    taux_tva = 0.20    # 20 %
+
+    # Calculs
+    tva_amount  = file_price_ht * taux_tva
+    price_ttc   = file_price_ht + tva_amount
+  
+     # ✅ Créer directement le JSON avec f-string
+    invoice_json = f"""
+    {{
+        "invoice_number": "STRIPE-{invoice_number}",
+        "Date": "{timestamp_letter}",
+        "Siret": "{siren or 'N/A'}",
+        "Internal_stripe_id": "{stripe_id}",
+        "company_name": "{company_name}",
+        "postal_address": "{billing_address}, {billing_post_code} {billing_city}, France",
+        "Prestation": "Fourniture d'un fichier de données sur mesure.",
+        "Réglement": "Via carte bancaire en ligne sur Stripe via le site markethings.io",
+        "Date du règlement": "{timestamp_letter}",
+        "prix HT": "{file_price_ht:.2f} euros",
+        "TVA 20%": "{tva_amount:.2f} euros",
+        "Prix TTC": "{price_ttc:.2f} euros",
+        "logo_path": "{PATH_LOGO_MARKETHINGS}",
+        "legal_baseline 1": "Markethings SAS, au capital de 15 000 euros, immatriculée au RCS NANTERRE 839 513 827",
+        "legal_baseline 2": "9 bis avenue JOFFRE 92250 La Garenne Colombes - markethings.io"
+    }}
+    """
+
+    #status = generate_invoice(invoice_json, local_invoice_file_path)
+    status = generate_professional_invoice(invoice_json, local_invoice_file_path)
+
+    return status, invoice_remote_file_path, local_invoice_file_path
+
 @app.route('/count_bot_v1', methods=['POST'])
 @require_api_key_v1
 @trafic_control
@@ -1510,7 +2297,6 @@ def memory_guard(f):
 @memory_guard
 
 def get_companies_v1():
-
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
@@ -1544,10 +2330,10 @@ def get_companies_v1():
             }), 200
 
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error get_companies_v1": str(e)}), 400
 
         except Exception as e:
-            logger.exception("Internal server error")
+            logger.exception("Internal server error get_companies_v1")
             return jsonify({
                 'error': 'Internal server error',
                 'message': str(e)
@@ -1590,7 +2376,7 @@ def get_companies_v1():
     elif mode == "big_file":
 
         #print(f"result:{result}")
-        file_link = get_company_file(criteria, result_count_companies_logic)
+        file_link = get_company_file(criteria, result_count_companies_logic,"")
         #print(f"company_info:{company_info}")
 
         return jsonify({
@@ -1598,7 +2384,7 @@ def get_companies_v1():
             "file_link": file_link
         }), 200
     else:
-        logger.exception("Incorrect data return mode")
+        logger.exception("Incorrect data return mode: get_companies_v1")
         return jsonify({
         'error': 'Incorrect data return mode',
         'message':  'Error server'
@@ -1676,6 +2462,7 @@ def get_companies_v2():
 
             #print(f"result:{result}")
             file_link = get_company_file(criteria, result)
+
             #print(f"company_info:{company_info}")
 
             return jsonify({
@@ -1693,14 +2480,212 @@ def get_companies_v2():
 
 
     except ValueError as e:
+        logger.exception("Internal server error: get_companies_v2")
+
         return jsonify({"error": str(e)}), 400
 
     except Exception as e:
-        logger.exception("Internal server error")
+        logger.exception("Internal server error: get_companies_v2")
         return jsonify({
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+
+
+
+    
+@app.route('/check_siren_build_file_V1', methods=['POST'])
+@require_api_key_v1
+
+def check_company():
+    # Récupération du JSON envoyé dans le corps de la requête
+    data                = request.get_json()
+    siren               = data['siren']
+    criteria            = data['criteria']
+    billing_post_code   = data['billing_post_code']
+    billing_address     = data['billing_address']
+    billing_full_name   = data['billing_full_name']
+    file_price          = data['file_price']
+    company             = data['company']
+    billing_city        = data['billing_city']
+
+
+    if not data:
+        return jsonify({"error": "JSON body is missing"}), 400
+
+    # Logique de vérification : On vérifie si le SIREN existe
+
+    try:
+        conn            = get_db_connection()
+        cursor          = conn.cursor(dictionary=True)
+        exists          = check_siren_in_db(siren, conn)
+        if exists:
+            new_stripe_id   = secrets.token_hex(10)
+            code = 200
+
+            # lancement du calcul du fichier
+            result = count_companies_logic(criteria)
+            # print("result")
+            # print(result)
+             # On nettoie l'email (remplacement des caractères spéciaux par des underscores)
+            #clean_email = re.sub(r'[^a-zA-Z0-9]', '_', raw_email)
+            
+            # 2. Génération du Timestamp (format: 20240522_143005)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 3. Construction du nom de fichier dynamique
+            file_name           = f"export_{timestamp}_{new_stripe_id}.xlsx"
+            #print(file_name)
+            local_data_file     = f"./customer_files/data/{file_name}"
+            data_remote_file_path    = f"{PATH_REMOTE_DATA_FILE}/{file_name}"
+
+            print(f"*******************data_remote_file_path:{data_remote_file_path}")
+            list_siren = result['siren_list']
+
+            # 1. Préparer le thread
+            thread_prod = threading.Thread(
+                target=get_company_file, 
+                args=(data_remote_file_path, local_data_file, criteria, list_siren, new_stripe_id)
+            )
+
+            # 2. Lancer le thread (ne bloque pas le script)
+            thread_prod.start()
+
+            # print("file_link")
+            # print(file_link)
+            # print(type(criteria))
+
+            insert_stripe_id_file_link_criteria(new_stripe_id, file_price, billing_post_code, billing_address, billing_city, billing_full_name, local_data_file, data_remote_file_path, company, siren, criteria, conn)
+
+
+        else:
+            new_stripe_id = None
+            logger.error(f"siren non existant: {siren}")
+            code = 404
+
+        # doc generation Id
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+    # Vous pouvez ici ajouter une logique pour valider les 'criteria' 
+    # envoyés dans le JSON si nécessaire.
+    
+    return jsonify({
+        "siren": siren,
+        "exists": exists,
+        "stripe_id": new_stripe_id
+    }), code
+
+
+# doc webhook call when sucess payment
+@app.route('/purchase_success_V1', methods=['POST'])
+@require_api_key_v1
+
+def purchase_success_V1():
+
+     # Récupération du JSON envoyé dans le corps de la requête
+    data            = request.get_json()
+    stripe_id       = data['stripe_id']
+    email_client    = data['email_client']
+    card_owner      = data['card_owner']
+
+    try:
+        conn            = get_db_connection()
+        cursor          = conn.cursor(dictionary=True)
+        # doc update payment info and customer_email
+        update_payment_info_email(stripe_id, email_client, card_owner, conn)
+
+        local_data_file_path, data_remote_file_path = get_data_file_link(stripe_id, conn)
+        data_remote_file_with_email_path       = data_remote_file_path.replace(".xlsx", f"_{email_client}.xlsx")
+
+        # doc verification of the production od the data file
+        status_file_ready  = wait_for_data_file(stripe_id, conn)
+
+        if status_file_ready:
+            # doc in voice production
+            status, invoice_remote_file_path, invoice_local_file_path = invoice_edition(stripe_id, conn)
+            update_payment_invoice(stripe_id, invoice_remote_file_path, conn)
+
+        else:
+             return jsonify({
+                    "error":"data_file not build",
+                    "success": False
+                }), 404
+    except Exception as e:
+        logger.exception("Internal server error: purchase_success_V1")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+    if VERBOSE == "yes":
+        print("**********************")
+        print(f"local_data_file_path:{local_data_file_path}")
+        print(f"data_remote_file_with_email_path:{data_remote_file_with_email_path}")
+        print(f"invoice_local_file_path:{invoice_local_file_path}")
+        print(f"invoice_remote_file_path:{invoice_remote_file_path}")
+
+
+    status_push_delivery_files = push_delivery_files(local_data_file_path, data_remote_file_with_email_path, invoice_local_file_path, invoice_remote_file_path )
+
+    data_remote_file_with_email_link = data_remote_file_with_email_path.replace(PATH_REMOTE_OVH, LINK_REMOTE_OVH)
+    #print(f"data_remote_file_with_email_link:{data_remote_file_with_email_link}")
+    invoice_remote_file_link = invoice_remote_file_path.replace(PATH_REMOTE_OVH, LINK_REMOTE_OVH)
+    #print(f"data_remote_file_with_email_link:{data_remote_file_with_email_link}")
+ 
+    return jsonify({
+        "data_remote_file_path":data_remote_file_with_email_link,
+        "invoice_remote_file_path":invoice_remote_file_link,
+        "success": True
+    }), 200
+
+
+# doc déclencehemtnvia le webhook
+@app.route('/get_info_success_page_V1', methods=['POST'])
+@require_api_key_v1
+
+def get_info_success_page():
+     # Récupération du JSON envoyé dans le corps de la requête
+    data            = request.get_json()
+    stripe_id       = data['stripe_id']
+  
+    try:
+        conn            = get_db_connection()
+        cursor          = conn.cursor(dictionary=True)
+        # doc update payment info and customer_email
+        invoice_link_file, data_link_file = get_info_success_page(stripe_id, conn)
+        # doc in voice production
+
+    except Exception as e: 
+        logger.exception("Internal server error get_info_success_page")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+    
+    return jsonify({
+        "invoice_link_file":invoice_link_file,
+        "data_link_file":data_link_file,
+        "success": True
+    }), 200
+
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
