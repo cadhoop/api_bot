@@ -10,7 +10,6 @@ import sys
 from typing import List, Optional
 import operator as op
 
-
 #  python3 API_bot_test.py --server="localhost"
 VERSION = "V1"
 #VERSION = "V2"
@@ -729,7 +728,7 @@ test_cases = [
     {
         "name": "Test 29 - purchase_success_V1",
         "url_end_point": "purchase_success_V1",
-        "stripe_id": "d3ca786c70a1ec064e0e",
+        "stripe_id": "b88acab690dd5789d7a9",
         "email_client": "charles-antoine@markethings.io",
         "card_owner":"d'HOOP",
         "expected": {"success": True}
@@ -990,6 +989,7 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
         results.append(result)
         response = result.get('response', {})
 
+        print(response)
         if 'error' in response:   
             business_ok = False
             tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
@@ -1394,8 +1394,8 @@ def main():
         API_URL = f"http://{server_ip}:5001/count_bot_v2"
     elif VERSION == "V1":
         API_URL = f"http://{server_ip}:5001/count_bot_v1"
-        API_URL_CHECK_SIREN_GET_ID  = f"http://{server_ip}:5001/check_siren_build_file_V1"
-        API_CONFIRM_PAYMENT         = f"http://{server_ip}:5001/purchase_success_V1"
+        API_URL_CHECK_SIREN_GET_ID  = f"http://{server_ip}:5002/check_siren_build_file_V1"
+        API_CONFIRM_PAYMENT         = f"http://{server_ip}:5002/purchase_success_V1"
 
 
     # print(f"Using API URL: {API_URL}")
