@@ -2540,7 +2540,7 @@ def check_company():
             local_data_file     = f"./customer_files/data/{file_name}"
             data_remote_file_path    = f"{PATH_REMOTE_DATA_FILE}/{file_name}"
 
-            print(f"*******************data_remote_file_path:{data_remote_file_path}")
+            #print(f"*******************data_remote_file_path:{data_remote_file_path}")
             list_siren = result['siren_list']
 
             # 1. Préparer le thread
