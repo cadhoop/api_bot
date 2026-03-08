@@ -75,7 +75,7 @@ parser.add_argument('--verbose', type=str, default="no", help='Activer le mode v
 # 3. Récupérer les arguments
 args = parser.parse_args()
 
-VERBOSE = False
+VERBOSE = True
 # 4. Utilisation dans votre code
 if args.verbose == "yes":
     print("--- MODE VERBOSE ACTIVÉ ---")
@@ -238,6 +238,9 @@ def insert_api_log(timestamp, request_json, duration, response_json, ip_address)
     Inserts an API call log into the LogAPI_bot table
     """
     try:
+        if ip_address == "::1":
+            ip_address = "127.0.0.1"
+        print(f"ip_address:{ip_address}")
         conn = get_db_connection()
         cursor = conn.cursor()
         query = """
@@ -1010,6 +1013,7 @@ def count_companies_logic(criteria: dict):
     timestamp = datetime.now()
 
     response = None
+    # print(f"criteria fct count_companies_logic :{criteria}")
 
     try:
         if not criteria:
@@ -1037,12 +1041,25 @@ def count_companies_logic(criteria: dict):
             .get('original_activity_request', [])
         )
         semantic_count_requested = (
-            criteria_dict.get('activity', {})
-            .get('semantic_count_requested', False)
+            execution_block.get('is_semantic_active', False)
         )
-        #print(f"semantic_count_requested:{semantic_count_requested}")
-        # --- Total count legal ---
 
+     
+        activity_codes_list = (
+            criteria_dict.get('activity', {})
+            .get('activity_codes_list', [])
+        )
+
+        flag_activity_empty = False
+        if not activity_codes_list:
+            print("activity_codes_list est vide")
+            flag_activity_empty = True
+
+        else:
+            print(f"activity_codes_list: {activity_codes_list}")  # => ['1013B', '4722Z']
+            print(f"semantic_count_requested:{semantic_count_requested}")
+
+        # print(f"flag_activity_empty fct count_companies_logic:{flag_activity_empty}")
         # doc the function includes the swith count/list of siren
         query, params = build_query_legal(criteria_dict, mode == "count")
         check_sql_params(query, params)
@@ -1051,6 +1068,7 @@ def count_companies_logic(criteria: dict):
 
         if VERBOSE:
             print(f"debug_sql:{debug_sql}")
+
         cursor.execute(debug_sql)
 
 
@@ -1059,7 +1077,7 @@ def count_companies_logic(criteria: dict):
         if mode == "count":
 
             result = cursor.fetchone()
-
+            
             total_count_legal = result['count'] if result else 0
        
             list_siren_semantic = None
@@ -1067,7 +1085,10 @@ def count_companies_logic(criteria: dict):
 
             # doc on laisse le double run le temps d'adaptation du front
 
-            if (semantic_count_requested or original_activity_request):
+            #print(f"fct count_companies_logic - semantic_count_requested:{semantic_count_requested}")
+            #print(f"fct count_companies_logic - original_activity_request:{original_activity_request}")
+
+            if (semantic_count_requested and (original_activity_request)):
                 total_count_semantic, list_siren_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, True)
             else:
                 total_count_semantic = 0
@@ -1094,6 +1115,9 @@ def count_companies_logic(criteria: dict):
                     "count_legal": result_code['count'] if result_code else 0
                 }
 
+            if flag_activity_empty:
+                total_count_legal = 0
+                activity_individual_counts = {}
 
             response = {
                 'count_legal': total_count_legal,
@@ -1101,6 +1125,7 @@ def count_companies_logic(criteria: dict):
                 'activity_individual_counts': activity_individual_counts or None,
                 'debug_sql': debug_sql
             }
+
 
         elif mode == "display":
 
@@ -1118,20 +1143,27 @@ def count_companies_logic(criteria: dict):
 
             # Votre logique de flag
             #print(f"semantic_count_requested:{semantic_count_requested}")
+
             list_siren_semantic = None
             # doc on laisse le double run le temps d'adaptation du front
-            if (semantic_count_requested or original_activity_request):
+            #print(f"semantic_count_requested display:{semantic_count_requested}")
+            #print(f"original_activity_request display:{original_activity_request}")
+
+            if (semantic_count_requested and original_activity_request != []):
                 # doc calcul des siren issus de la recherche sémantique.
                 total_count_semantic, list_siren_semantic = count_semantic(original_activity_request, strip_activite_condition(debug_sql),conn, False)
             else:
                 total_count_semantic = 0
-                list_siren_semantic = siren_list_legal
+                list_siren_semantic = []
             
+            if flag_activity_empty:
+                siren_list_legal = []
+
             #print(f"list_siren_semantic:{list_siren_semantic}")
             response = {
                 "count": len(siren_list_legal),
-                "results_semantic": list_siren_semantic,
-                "results_legal": siren_list_legal
+                "results_semantic": list_siren_semantic[:10],
+                "results_legal": siren_list_legal[:10]
             }
 
         elif mode == "big_file":

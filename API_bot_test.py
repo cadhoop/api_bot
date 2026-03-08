@@ -10,7 +10,9 @@ import sys
 from typing import List, Optional
 import operator as op
 
-#  python3 API_bot_test.py --server="localhost"
+#  python3 API_bot_test.py --server="localhost" --tests="26"
+
+
 VERSION = "V1"
 #VERSION = "V2"
 print(f"VERSION:{VERSION}")
@@ -728,7 +730,7 @@ test_cases = [
     {
         "name": "Test 29 - purchase_success_V1",
         "url_end_point": "purchase_success_V1",
-        "stripe_id": "b88acab690dd5789d7a9",
+        "stripe_id": "56d742973e8df85d0ef2",
         "email_client": "charles-antoine@markethings.io",
         "card_owner":"d'HOOP",
         "expected": {"success": True}
@@ -778,13 +780,22 @@ elif VERSION == "V2":
     if not API_KEYS:
         raise ValueError("API_KEYS environment variable not set!")
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Run API bot tests")
     parser.add_argument('--server', required=True, help='Server address')
-    parser.add_argument('test_numbers', nargs='?', help='Test numbers to replay, e.g., 1-5-12')
-
+    parser.add_argument('--tests', dest='test_numbers', help='Test numbers to replay')
+    
+    # Suppression de l'éventuel action='store_true' 
+    # On définit explicitement qu'il attend une chaîne (str)
+    parser.add_argument(
+        '--verbose',
+        type=str, 
+        choices=['yes', 'no'],
+        default='no',
+        help='Activate verbose mode (yes/no)'
+    )
     return parser.parse_args()
+
 
 def test_api(test_case):
 
@@ -989,7 +1000,7 @@ def run_all_tests(test_numbers: Optional[List[int]] = None):
         results.append(result)
         response = result.get('response', {})
 
-        print(response)
+        #print(response)
         if 'error' in response:   
             business_ok = False
             tab_errors.append(f"test_number:{test_case}; erreur bas niveau")
@@ -1342,9 +1353,10 @@ def main():
 
     global API_URL, API_URL_CHECK_SIREN_GET_ID, API_CONFIRM_PAYMENT, VERBOSE
 
+    print("00006 toto")
     # 2. ANALYSE DES ARGUMENTS
     args = parser.parse_args()
-    VERBOSE = "no"
+    print("0003")
     # 3. GESTION DU MODE VERBEUX
     VERBOSE = "yes" if args.verbose else "no"
     if args.verbose:

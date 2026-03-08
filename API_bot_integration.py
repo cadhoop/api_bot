@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-# from datetime import datetime
+from datetime import datetime
 # import mysql.connector
 # from mysql.connector import Error
 # from typing import Dict, Any, List, Optional
@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 # from datetime import date, datetime
 # from typing import Dict, List, Tuple
 # import logging
-# import sys
+import sys
 # import time
 # import json
 # from functools import wraps
@@ -33,10 +33,10 @@ from flask import Flask, request, jsonify
 from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT, PATH_REMOTE_OVH, LINK_REMOTE_OVH, SFTP_NAME,SFTP_PORT,SFTP_USERNAME,SFTP_PASSWORD,PATH_REMOTE_DATA_FILE,PATH_REMOTE_INVOICE_FILE,PATH_LOCAL_INVOICE_FILE,PATH_LOCAL_DATA_FILE, PATH_LOGO_MARKETHINGS_EKIMIA, PATH_LOGO_MARKETHINGS_IKOULA3
 
 # doc import functions
-import library
-from library import require_api_key_v1, trafic_control, query_control, memory_guard, require_api_key_v2, count_companies_logic, get_company_info
+import API_bot_library
+from API_bot_library import require_api_key_v1, trafic_control, query_control, memory_guard, require_api_key_v2, count_companies_logic, get_company_info
 
-from library import VERBOSE
+from API_bot_library import VERBOSE
 
 
 
@@ -71,9 +71,11 @@ def get_companies_v1():
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
+   
+    criteria = request.get_json()
     if VERBOSE:
         print(request)
-    criteria = request.get_json()
+        print(criteria)
     criteria_dict = criteria.get("criteria", criteria)
 
     execution_block = criteria_dict.get("execution_mode", {})
@@ -90,8 +92,10 @@ def get_companies_v1():
     mode = execution_block.get("output_type", "count")
 
     #print(f"mode:{mode}")
+    
     result_count_companies_logic = count_companies_logic(criteria)
-
+    
+    #print(f"result_count_companies_logic:{mode};{result_count_companies_logic}")
     if mode == "count":
         try:
 
@@ -117,11 +121,13 @@ def get_companies_v1():
 
     elif mode == "display":
 
+        # print("display")
         #print(f"result:{result}")
             #print(f"result display:{result_count_companies_logic}")
 
             # On extrait la liste directement depuis le dictionnaire 'result'
         if isinstance(result_count_companies_logic, dict):
+            
             # On récupère la liste d'entiers (on utilise results_legal ou results_semantic)
             siren_list_legal    = result_count_companies_logic.get('results_legal', [])
             siren_list_semantic = result_count_companies_logic.get('results_semantic', [])
@@ -130,19 +136,29 @@ def get_companies_v1():
             siren_list_legal    = []
             siren_list_semantic = []
 
+      
 
         # Maintenant on appelle votre fonction SQL avec cette liste d'entiers
         result_legal    = get_company_info(siren_list_legal, "origine: codes NAF")
         result_semantic = get_company_info(siren_list_semantic, "origine: sémantique")
 
-        # 2. On construit la réponse
-        # Puisque result_legal est un dictionnaire, .get() fonctionne parfaitement
-        return jsonify({
+        if VERBOSE:
+            print(datetime.now())
+            print("result_legal")
+            print(result_legal)
+
+            print("result_semantic")
+            print(result_semantic)
+
+        return_json = {
             "status": "success",
             "company_info_semantic": result_semantic,
-            "company_info_legal": result_legal.get("data", []),
-            "metadata": result_legal.get("metadata", {})
-        }), 200
+            "company_info_legal": result_legal
+        }
+        # print(f"return_json:{return_json}")
+        # 2. On construit la réponse
+        # Puisque result_legal est un dictionnaire, .get() fonctionne parfaitement
+        return jsonify(return_json), 200
 
     elif mode == "big_file":
 
@@ -190,7 +206,7 @@ def get_companies_v2():
         # We provide "count" as a second argument so it has a default value
         mode = execution_block.get("output_type", "count")
 
-        #print(f"mode:{mode}")
+
         if mode == "count":
 
             return jsonify({
@@ -220,12 +236,12 @@ def get_companies_v2():
 
             # 2. On construit la réponse
             # Puisque result_legal est un dictionnaire, .get() fonctionne parfaitement
-            return jsonify({
+            resultat_tmp = {
                 "status": "success",
-                "company_info_semantic": result_legal.get("data", []),
+                "company_info_semantic": result_semantic.get("data", []),
                 "company_info_legal": result_legal.get("data", []),
-                "metadata": result_legal.get("metadata", {})
-            }), 200
+            }
+            return jsonify(resultat_tmp), 200
 
         elif mode == "big_file":
 
