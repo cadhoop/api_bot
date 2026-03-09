@@ -74,8 +74,8 @@ def get_companies_v1():
    
     criteria = request.get_json()
     if VERBOSE:
-        print(request)
-        print(criteria)
+        print(f"request:{request}")
+        print(f"criteria:{criteria}")
     criteria_dict = criteria.get("criteria", criteria)
 
     execution_block = criteria_dict.get("execution_mode", {})
@@ -95,7 +95,7 @@ def get_companies_v1():
     
     result_count_companies_logic = count_companies_logic(criteria)
     
-    #print(f"result_count_companies_logic:{mode};{result_count_companies_logic}")
+    print(f"result_count_companies_logic:{mode};{result_count_companies_logic}")
     if mode == "count":
         try:
 
@@ -123,7 +123,7 @@ def get_companies_v1():
 
         # print("display")
         #print(f"result:{result}")
-            #print(f"result display:{result_count_companies_logic}")
+        print(f"result display:{result_count_companies_logic}")
 
             # On extrait la liste directement depuis le dictionnaire 'result'
         if isinstance(result_count_companies_logic, dict):
@@ -137,6 +137,8 @@ def get_companies_v1():
             siren_list_semantic = []
 
       
+        print(f"siren_list_legal:{siren_list_legal}")
+        print(f"siren_list_semantic:{siren_list_semantic}")
 
         # Maintenant on appelle votre fonction SQL avec cette liste d'entiers
         result_legal    = get_company_info(siren_list_legal, "origine: codes NAF")

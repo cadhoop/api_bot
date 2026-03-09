@@ -354,6 +354,8 @@ def format_sql_for_debug(query: str, params: List[Any]) -> str:
     ⚠️ FOR DEBUGGING ONLY – NEVER execute this string.
     """
 
+    print(f"DEBUG -- params fct format_sql_for_debug:{params}")
+
     def format_value(value: Any) -> str:
         if value is None:
             return "NULL"
@@ -408,31 +410,31 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
         where_clauses.append(f"{field_name} = ?")
         params.append(value)
 
-
 def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
     """
     Builds the SQL query and parameters from targeting criteria.
+    Normalisation des dates incluse pour éviter les erreurs de format SQL.
     """
     where_clauses: List[str] = []
     params: List[Any] = []
 
     # ==============================
-    # 1. Table Choice (Headquarters)
+    # 1. Table Choice
     # ==============================
-    table = TABLE_ALL
-    legal_criteria = criteria.get('legal_criteria', {})
+    table = TABLE_FAST
+    legal_criteria = criteria.get('criteres_juridiques') or criteria.get('legal_criteria', {})
+    
     if legal_criteria.get('present') and legal_criteria.get('headquarters') is True:
         table = TABLE_FAST
 
     # ==============================
-    # 2. Location (Hierarchical + OR logic)
+    # 2. Location
     # ==============================
     if criteria.get('location', {}).get('present'):
         loc = criteria['location']
         filtered_loc = filter_location_by_hierarchy(loc, df_insee)
         
         loc_clauses = []
-        # Process each level; if data exists, add to the OR group
         for key in ['city', 'post_code', 'departement', 'region']:
             values = filtered_loc.get(key)
             if values:
@@ -444,7 +446,6 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
                 loc_clauses.append(f"{field_name} IN ({placeholders})")
                 params.extend(values)
 
-        # Wrap all location filters in (OR) to avoid breaking other AND filters
         if loc_clauses:
             where_clauses.append(f"({' OR '.join(loc_clauses)})")
 
@@ -462,9 +463,9 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
     # ==============================
     # 4. Company Size
     # ==============================
-    if criteria.get('company_size', {}).get('present'):
-        size = criteria['company_size']
-        value = size.get('employees_number_range')
+    size = criteria.get('taille_entreprise') or criteria.get('company_size', {})
+    if size.get('present'):
+        value = size.get('tranche_effectif') or size.get('employees_number_range')
         if value:
             if isinstance(value, list):
                 placeholders = ",".join(["?"] * len(value))
@@ -477,50 +478,74 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
     # ==============================
     # 5. Financial Criteria
     # ==============================
-    if criteria.get('financial_criteria', {}).get('present'):
-        fin = criteria['financial_criteria']
-        for field in ['turnover', 'net_profit', 'profitability']:
-            if fin.get(field) is not None:
-                if fin.get(f'{field}_sup', True):
-                    where_clauses.append(f"{FIELD_MAPPING[field]} >= ?")
-                    params.append(fin[field])
-                if fin.get(f'{field}_inf', False):
-                    where_clauses.append(f"{FIELD_MAPPING[field]} <= ?")
-                    params.append(fin[field])
+    fin = criteria.get('criteres_financiers') or criteria.get('financial_criteria', {})
+    if fin.get('present'):
+        mapping_fin = {
+            'turnover': 'ca_plus_recent',
+            'net_profit': 'resultat_net_plus_recent',
+            'profitability': 'rentabilite_plus_recente'
+        }
+        
+        for lib_field, front_field in mapping_fin.items():
+            val = fin.get(front_field)
+            if val is not None:
+                if fin.get(f'{front_field}_sup', True):
+                    where_clauses.append(f"{FIELD_MAPPING[lib_field]} >= ?")
+                    params.append(val)
+                if fin.get(f'{front_field}_inf', False):
+                    where_clauses.append(f"{FIELD_MAPPING[lib_field]} <= ?")
+                    params.append(val)
 
     # ==============================
-    # 6. Legal Criteria
+    # 6. Legal Criteria (CORRECTIF MULTI-LABELS)
     # ==============================
     if legal_criteria.get('present'):
-        if legal_criteria.get('legal_category'):
+        # 1. Catégorie juridique (gère les deux labels)
+        cat_jur = (legal_criteria.get('categorie_juridique') or 
+                   legal_criteria.get('legal_category'))
+        if cat_jur:
             where_clauses.append(f"{FIELD_MAPPING['legal_category']} = ?")
-            params.append(legal_criteria['legal_category'])
+            params.append(cat_jur)
 
-        # Creation Date
-        if legal_criteria.get('company_creation_date_threshold'):
-            d_field = FIELD_MAPPING['company_creation_date_threshold']
-            val = legal_criteria['company_creation_date_threshold']
-            if legal_criteria.get('company_creation_date_sup'):
-                where_clauses.append(f"{d_field} >= ?")
-                params.append(val)
-            if legal_criteria.get('company_creation_date_inf'):
-                where_clauses.append(f"{d_field} <= ?")
-                params.append(val)
+        # 2. Gestion des Dates de création
+        d_field = FIELD_MAPPING.get('company_creation_date_threshold')
+        
+        # --- CAS A : Format "Preview" (Français : min/max) ---
+        d_min = legal_criteria.get('date_creation_entreprise_min')
+        d_max = legal_criteria.get('date_creation_entreprise_max')
+
+        # --- CAS B : Format "Count" (Anglais : threshold + flags) ---
+        d_threshold = legal_criteria.get('company_creation_date_threshold')
+        is_inf = legal_criteria.get('company_creation_date_inf')
+        is_sup = legal_criteria.get('company_creation_date_sup')
+
+        # Logique de décision pour la Date Minimale (Borne Inférieure)
+        final_min = d_min or (d_threshold if is_sup else None)
+        if final_min:
+            # Normalisation si année seule
+            val_min = f"{final_min}-01-01" if len(str(final_min)) == 4 else final_min
+            where_clauses.append(f"{d_field} >= ?")
+            params.append(val_min)
+
+        # Logique de décision pour la Date Maximale (Borne Supérieure)
+        final_max = d_max or (d_threshold if is_inf else None)
+        if final_max:
+            # Normalisation si année seule
+            val_max = f"{final_max}-12-31" if len(str(final_max)) == 4 else final_max
+            where_clauses.append(f"{d_field} <= ?")
+            params.append(val_max)
+
+        # 3. Capital
+        cap = legal_criteria.get('capital')
+        if cap is not None:
+            where_clauses.append(f"{FIELD_MAPPING['capital']} >= ?")
+            params.append(cap)
 
         # Capital
-        if legal_criteria.get('capital') is not None:
-            c_field = FIELD_MAPPING['capital']
-            val = legal_criteria['capital']
-            if legal_criteria.get('capital_threshold_sup'):
-                where_clauses.append(f"{c_field} >= ?")
-                params.append(val)
-            if legal_criteria.get('capital_threshold_inf'):
-                where_clauses.append(f"{c_field} <= ?")
-                params.append(val)
-
-        if legal_criteria.get('subsidiaries_number') is not None:
-            where_clauses.append(f"{FIELD_MAPPING['subsidiaries_number']} >= ?")
-            params.append(legal_criteria['subsidiaries_number'])
+        cap = legal_criteria.get('capital')
+        if cap is not None:
+            where_clauses.append(f"{FIELD_MAPPING['capital']} >= ?")
+            params.append(cap)
 
     # ==============================
     # Final Query Assembly
@@ -531,10 +556,10 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
         query = f"SELECT siren FROM {table}"
 
     if where_clauses:
-        query += " WHERE " + " AND ".join(where_clauses)
+        query += " WHERE " + " AND ".join(where_clauses) 
 
+    print(f"DEBUG SQL: params={params}; query={query}")
     return query, params
-
 
 
 
@@ -1013,7 +1038,7 @@ def count_companies_logic(criteria: dict):
     timestamp = datetime.now()
 
     response = None
-    # print(f"criteria fct count_companies_logic :{criteria}")
+    #print(f"criteria fct count_companies_logic :{criteria}")
 
     try:
         if not criteria:
@@ -1061,9 +1086,14 @@ def count_companies_logic(criteria: dict):
 
         # print(f"flag_activity_empty fct count_companies_logic:{flag_activity_empty}")
         # doc the function includes the swith count/list of siren
+
+        #print(f"DEBUG: criteria_dict:{criteria_dict}")
         query, params = build_query_legal(criteria_dict, mode == "count")
+        #print(f"DEBUG 2---- params:{params}; query:{query}")
+
         check_sql_params(query, params)
 
+        #print(f"DEBUG 3---- params:{params}; query:{query}")
         debug_sql = format_sql_for_debug(query, params)
 
         if VERBOSE:
