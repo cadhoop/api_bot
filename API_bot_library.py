@@ -230,8 +230,32 @@ def load_insee_referentiel(csv_path):
     return df_insee
 
 
+def normalize_geo(text: str) -> str:
+    """Retire les accents, passe en minuscule et remplace les tirets par des espaces."""
+    if not text: return ""
+    text = str(text).lower()
+    # Retire les accents
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    # Remplace tirets par espaces pour être plus flexible
+    return text.replace('-', ' ').strip()
+
+# On pré-calcule une version normalisée de ta table pour la performance
+NORM_REGIONS = {
+    normalize_geo(reg): [normalize_geo(d) for d in deps]
+    for reg, deps in REGIONS_DEPARTEMENTS.items()
+}
+
+
 # Chargement du référentiel INSEE (à faire une seule fois au démarrage)
+# Chargement et normalisation immédiate
 df_insee = load_insee_referentiel('communes-departement-region.csv')
+
+# On applique normalize_geo sur les colonnes de comparaison
+df_insee['nom_commune_norm'] = df_insee['nom_commune_complet'].apply(normalize_geo)
+df_insee['nom_region_norm'] = df_insee['nom_region'].apply(normalize_geo)
+# On s'assure que les codes sont des strings
+df_insee['code_departement'] = df_insee['code_departement'].astype(str)
+
 
 def insert_api_log(timestamp, request_json, duration, response_json, ip_address):
     """
@@ -259,62 +283,61 @@ def insert_api_log(timestamp, request_json, duration, response_json, ip_address)
         conn.close()
     except Exception as e:
         logger.error("Failed to log API call: %s", e)
-
-
 def filter_location_by_hierarchy(location_data, df_insee):
-    # Normaliser les inputs en listes
-    regions = location_data.get('region') or []
-    regions = regions if isinstance(regions, list) else [regions]
+    # 1. Normalisation immédiate des entrées
+    def clean_list(key):
+        vals = location_data.get(key) or []
+        if not isinstance(vals, list): vals = [vals]
+        # On normalise tout en string et sans accent/majuscule
+        return [normalize_geo(str(v)) for v in vals]
+
+    cities = clean_list('city')
+    regions = clean_list('region')
+    post_codes = clean_list('post_code')
     
-    departements = location_data.get('departement') or []
-    departements = departements if isinstance(departements, list) else [departements]
-    
-    post_codes = location_data.get('post_code') or []
-    post_codes = post_codes if isinstance(post_codes, list) else [post_codes]
-    
-    cities = location_data.get('city') or []
-    cities = cities if isinstance(cities, list) else [cities]
+    # Pour les départements, on convertit les noms en codes tout de suite (ex: 'paris' -> '75')
+    raw_deps = clean_list('departement')
+    departements = []
+    for d in raw_deps:
+        code = NORM_DEPT_TO_CODE.get(d, d) # Utilise le dictionnaire global
+        departements.append(code)
 
-    # --- HIERARCHY LOGIC ---
-    # Rule: If a child is inside a parent, drop the parent (keep the precision).
-    # If they are independent, keep both (unless your rule is to strictly keep only one level)
+    # --- LOGIQUE DE HIÉRARCHIE ---
 
-    # 1. Check Cities vs Others
-    if cities:
-        df_cities = df_insee[df_insee['nom_commune_complet'].isin(cities)]
-        if not df_cities.empty:
-            # Get parents of these cities
-            c_depts = df_cities['code_departement'].unique().tolist()
-            c_regions = df_cities['nom_region'].unique().tolist()
-            c_cps = df_cities['code_postal'].unique().tolist()
-
-            # Remove parents if they contain these cities
-            departements = [d for d in departements if d not in c_depts]
-            regions = [r for r in regions if r not in c_regions]
-            post_codes = [cp for cp in post_codes if cp not in c_cps]
-
-    # 2. Check Postcodes vs Others
+    # A. Si on a des Codes Postaux, on supprime les Départements et Régions parents
     if post_codes:
+        cp_prefixes = {cp[:2] for cp in post_codes} # ex: {'75'}
+        # On retire le département si son code (75) est déjà couvert par un CP (75011)
+        departements = [d for d in departements if d not in cp_prefixes]
+        
+        # Filtrage régions via INSEE
         df_cp = df_insee[df_insee['code_postal'].isin(post_codes)]
         if not df_cp.empty:
-            cp_depts = df_cp['code_departement'].unique().tolist()
-            cp_regions = df_cp['nom_region'].unique().tolist()
-
-            departements = [d for d in departements if d not in cp_depts]
+            cp_regions = df_cp['nom_region_norm'].unique().tolist()
             regions = [r for r in regions if r not in cp_regions]
 
-    # 3. Check Departements vs Regions
+    # B. Si on a des Villes, on supprime les Parents (si pas déjà fait par les CP)
+    if cities:
+        df_cities = df_insee[df_insee['nom_commune_norm'].isin(cities)]
+        if not df_cities.empty:
+            c_depts = df_cities['code_departement'].unique().tolist()
+            c_regions = df_cities['nom_region_norm'].unique().tolist()
+            
+            departements = [d for d in departements if d not in c_depts]
+            regions = [r for r in regions if r not in c_regions]
+
+    # C. Départements vs Régions
     if departements and regions:
         df_dept = df_insee[df_insee['code_departement'].isin(departements)]
         if not df_dept.empty:
-            d_regions = df_dept['nom_region'].unique().tolist()
+            d_regions = df_dept['nom_region_norm'].unique().tolist()
             regions = [r for r in regions if r not in d_regions]
 
     return {
-        'region': regions if regions else None,
-        'departement': departements if departements else None,
-        'post_code': post_codes if post_codes else None,
-        'city': cities if cities else None
+        'region': regions,
+        'departement': departements,
+        'post_code': post_codes,
+        'city': cities
     }
 
 def get_db_connection():
@@ -390,20 +413,6 @@ def format_sql_for_debug(query: str, params: List[Any]) -> str:
 
     return formatted_query
 
-def normalize_geo(text: str) -> str:
-    """Retire les accents, passe en minuscule et remplace les tirets par des espaces."""
-    if not text: return ""
-    text = str(text).lower()
-    # Retire les accents
-    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
-    # Remplace tirets par espaces pour être plus flexible
-    return text.replace('-', ' ').strip()
-
-# On pré-calcule une version normalisée de ta table pour la performance
-NORM_REGIONS = {
-    normalize_geo(reg): [normalize_geo(d) for d in deps]
-    for reg, deps in REGIONS_DEPARTEMENTS.items()
-}
 
 
 def add_scalar_or_list_filter(where_clauses, params, field_name, value):
@@ -425,6 +434,16 @@ def add_scalar_or_list_filter(where_clauses, params, field_name, value):
         where_clauses.append(f"{field_name} = ?")
         params.append(value)
 
+
+# --- CES DEUX LIGNES DOIVENT ÊTRE EN DEHORS DE TOUTE FONCTION ---
+# Elles créent les outils de recherche globale
+NORM_DEPT_TO_CODE = {normalize_geo(k): v for k, v in MAPPING_DEPARTEMENTS.items()}
+CODE_TO_DEPT_NAME = {v: k for k, v in MAPPING_DEPARTEMENTS.items()}
+
+# Si tu utilises aussi NORM_REGIONS pour d'autres parties du code :
+NORM_REGIONS = {normalize_geo(reg): [normalize_geo(d) for d in deps] 
+                for reg, deps in REGIONS_DEPARTEMENTS.items()}
+                
 def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
     """
     Builds the SQL query and parameters from targeting criteria.
@@ -442,69 +461,32 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
     if legal_criteria.get('present') and legal_criteria.get('headquarters') is True:
         table = TABLE_FAST
 
- # ==============================
-    # 2. Location (Avec priorité CP > Département > Région)
     # ==============================
-    NORM_DEPT_TO_CODE = {normalize_geo(k): v for k, v in MAPPING_DEPARTEMENTS.items()}
+    # 2. Location (Normalisation & Hiérarchie INSEE)
+    # ==============================
     if criteria.get('location', {}).get('present'):
-        loc = criteria['location']
+        # On passe le flux dans le filtre hiérarchique (qui normalise déjà tout)
+        cleaned_loc = filter_location_by_hierarchy(criteria['location'], df_insee)
         
-        def to_list(v):
-            if not v: return []
-            return v if isinstance(v, list) else [v]
-
-        in_cities = to_list(loc.get('city'))
-        in_post_codes = to_list(loc.get('post_code'))
-        in_deps = to_list(loc.get('departement'))
-        in_regions = to_list(loc.get('region'))
-
-        # --- ÉTAPE 1 : Analyse des Codes Postaux pour priorité ---
-        # On identifie les codes de départements déjà couverts par les CP
-        depts_covered_by_cp = set()
-        for pc in in_post_codes:
-            prefix = str(pc)[:2]
-            depts_covered_by_cp.add(prefix)
-
-        # --- ÉTAPE 2 : Conversion et filtrage des départements ---
+        # Récupération des valeurs nettoyées
+        final_cities = cleaned_loc['city']
+        final_post_codes = cleaned_loc['post_code']
+        final_regions = cleaned_loc['region']
+        
+        # Conversion finale des départements en CODES pour la DB
         final_deps_codes = []
-        precise_set_for_filtering = set()
-
-        for d in in_deps:
-            d_norm = normalize_geo(d)
-            code = NORM_DEPT_TO_CODE.get(d_norm, d)
-            
-            # PRIORITÉ : On n'ajoute le département que s'il n'est pas déjà couvert par un CP
-            if code not in depts_covered_by_cp:
-                final_deps_codes.append(code)
-            
-            precise_set_for_filtering.add(d_norm) # Pour le filtrage région
-            precise_set_for_filtering.add(code)   # Pour le filtrage région
-
-        # Ajout des informations CP au set de filtrage (pour les régions)
-        for pc in in_post_codes:
-            prefix = str(pc)[:2]
-            precise_set_for_filtering.add(prefix)
-            if prefix in CODE_TO_DEPT_NAME:
-                precise_set_for_filtering.add(normalize_geo(CODE_TO_DEPT_NAME[prefix]))
-
-        # --- ÉTAPE 3 : Filtrage des régions ---
-        final_regions = []
-        for r in in_regions:
-            r_norm = normalize_geo(r)
-            deps_of_reg = NORM_REGIONS.get(r_norm, [])
-            # Collision si un département de la région est déjà dans le set précis
-            collision = any(d in precise_set_for_filtering for d in deps_of_reg)
-            
-            if not collision:
-                final_regions.append(r)
+        for d in cleaned_loc['departement']:
+            # d est déjà normalisé par filter_location_by_hierarchy
+            code = NORM_DEPT_TO_CODE.get(d, d)
+            final_deps_codes.append(code)
 
         # --- ÉTAPE 4 : Construction SQL ---
         loc_clauses = []
         loc_params = []
         
         to_process = [
-            ('city', in_cities),
-            ('post_code', in_post_codes),
+            ('city', final_cities),
+            ('post_code', final_post_codes),
             ('departement', final_deps_codes), 
             ('region', final_regions)
         ]
