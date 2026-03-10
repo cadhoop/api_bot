@@ -29,7 +29,7 @@ import paramiko
 
 
 
-from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT, PATH_REMOTE_OVH, LINK_REMOTE_OVH, SFTP_NAME,SFTP_PORT,SFTP_USERNAME,SFTP_PASSWORD,PATH_REMOTE_DATA_FILE,PATH_REMOTE_INVOICE_FILE,PATH_LOCAL_INVOICE_FILE,PATH_LOCAL_DATA_FILE, PATH_LOGO_MARKETHINGS_EKIMIA, PATH_LOGO_MARKETHINGS_IKOULA3
+from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, FIELD_MAPPING, CODE_TO_DEPT_NAME, REGIONS_DEPARTEMENTS,  MAPPING_DEPARTEMENTS, TAB_STOPWORDS, TAB_MOTS_SUP100000_SANS_ACCENT, MOIS_ANNEE, TABLE_FAST,TABLE_ALL,TABLE_AFNIC,MIN_FULLTEXT_LENGTH,LIMIT_DISPLAY_INFO,UNITARY_PRICE_LEGAL_INFOS,MAX_DAILY_REQUESTS_NUMBER, FRENCH_ELISIONS,AUTH_WINDOW , MESSAGE_WORD_TOO_COMMON_1, MESSAGE_WORD_TOO_COMMON_2, MEMORY_THRESHOLD_PERCENT, PATH_REMOTE_OVH, LINK_REMOTE_OVH, SFTP_NAME,SFTP_PORT,SFTP_USERNAME,SFTP_PASSWORD,PATH_REMOTE_DATA_FILE,PATH_REMOTE_INVOICE_FILE,PATH_LOCAL_INVOICE_FILE,PATH_LOCAL_DATA_FILE, PATH_LOGO_MARKETHINGS_EKIMIA, PATH_LOGO_MARKETHINGS_IKOULA3
 
 # Variable globale pour le mode verbose
 VERBOSE = False
@@ -390,6 +390,21 @@ def format_sql_for_debug(query: str, params: List[Any]) -> str:
 
     return formatted_query
 
+def normalize_geo(text: str) -> str:
+    """Retire les accents, passe en minuscule et remplace les tirets par des espaces."""
+    if not text: return ""
+    text = str(text).lower()
+    # Retire les accents
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    # Remplace tirets par espaces pour être plus flexible
+    return text.replace('-', ' ').strip()
+
+# On pré-calcule une version normalisée de ta table pour la performance
+NORM_REGIONS = {
+    normalize_geo(reg): [normalize_geo(d) for d in deps]
+    for reg, deps in REGIONS_DEPARTEMENTS.items()
+}
+
 
 def add_scalar_or_list_filter(where_clauses, params, field_name, value):
     """
@@ -427,27 +442,82 @@ def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str
     if legal_criteria.get('present') and legal_criteria.get('headquarters') is True:
         table = TABLE_FAST
 
+ # ==============================
+    # 2. Location (Avec priorité CP > Département > Région)
     # ==============================
-    # 2. Location
-    # ==============================
+    NORM_DEPT_TO_CODE = {normalize_geo(k): v for k, v in MAPPING_DEPARTEMENTS.items()}
     if criteria.get('location', {}).get('present'):
         loc = criteria['location']
-        filtered_loc = filter_location_by_hierarchy(loc, df_insee)
         
+        def to_list(v):
+            if not v: return []
+            return v if isinstance(v, list) else [v]
+
+        in_cities = to_list(loc.get('city'))
+        in_post_codes = to_list(loc.get('post_code'))
+        in_deps = to_list(loc.get('departement'))
+        in_regions = to_list(loc.get('region'))
+
+        # --- ÉTAPE 1 : Analyse des Codes Postaux pour priorité ---
+        # On identifie les codes de départements déjà couverts par les CP
+        depts_covered_by_cp = set()
+        for pc in in_post_codes:
+            prefix = str(pc)[:2]
+            depts_covered_by_cp.add(prefix)
+
+        # --- ÉTAPE 2 : Conversion et filtrage des départements ---
+        final_deps_codes = []
+        precise_set_for_filtering = set()
+
+        for d in in_deps:
+            d_norm = normalize_geo(d)
+            code = NORM_DEPT_TO_CODE.get(d_norm, d)
+            
+            # PRIORITÉ : On n'ajoute le département que s'il n'est pas déjà couvert par un CP
+            if code not in depts_covered_by_cp:
+                final_deps_codes.append(code)
+            
+            precise_set_for_filtering.add(d_norm) # Pour le filtrage région
+            precise_set_for_filtering.add(code)   # Pour le filtrage région
+
+        # Ajout des informations CP au set de filtrage (pour les régions)
+        for pc in in_post_codes:
+            prefix = str(pc)[:2]
+            precise_set_for_filtering.add(prefix)
+            if prefix in CODE_TO_DEPT_NAME:
+                precise_set_for_filtering.add(normalize_geo(CODE_TO_DEPT_NAME[prefix]))
+
+        # --- ÉTAPE 3 : Filtrage des régions ---
+        final_regions = []
+        for r in in_regions:
+            r_norm = normalize_geo(r)
+            deps_of_reg = NORM_REGIONS.get(r_norm, [])
+            # Collision si un département de la région est déjà dans le set précis
+            collision = any(d in precise_set_for_filtering for d in deps_of_reg)
+            
+            if not collision:
+                final_regions.append(r)
+
+        # --- ÉTAPE 4 : Construction SQL ---
         loc_clauses = []
-        for key in ['city', 'post_code', 'departement', 'region']:
-            values = filtered_loc.get(key)
-            if values:
-                if not isinstance(values, list):
-                    values = [values]
-                
-                placeholders = ", ".join(["?"] * len(values))
-                field_name = FIELD_MAPPING[key]
-                loc_clauses.append(f"{field_name} IN ({placeholders})")
-                params.extend(values)
+        loc_params = []
+        
+        to_process = [
+            ('city', in_cities),
+            ('post_code', in_post_codes),
+            ('departement', final_deps_codes), 
+            ('region', final_regions)
+        ]
+
+        for key, vals in to_process:
+            if vals:
+                placeholders = ", ".join(["?"] * len(vals))
+                loc_clauses.append(f"{FIELD_MAPPING[key]} IN ({placeholders})")
+                loc_params.extend(vals)
 
         if loc_clauses:
             where_clauses.append(f"({' OR '.join(loc_clauses)})")
+            params.extend(loc_params)
 
     # ==============================
     # 3. Activity
