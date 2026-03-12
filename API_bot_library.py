@@ -283,6 +283,8 @@ def insert_api_log(timestamp, request_json, duration, response_json, ip_address)
         conn.close()
     except Exception as e:
         logger.error("Failed to log API call: %s", e)
+
+
 def filter_location_by_hierarchy(location_data, df_insee):
     # 1. Normalisation immédiate des entrées
     def clean_list(key):
@@ -443,7 +445,7 @@ CODE_TO_DEPT_NAME = {v: k for k, v in MAPPING_DEPARTEMENTS.items()}
 # Si tu utilises aussi NORM_REGIONS pour d'autres parties du code :
 NORM_REGIONS = {normalize_geo(reg): [normalize_geo(d) for d in deps] 
                 for reg, deps in REGIONS_DEPARTEMENTS.items()}
-                
+
 def build_query_legal(criteria: Dict[str, Any], flag_count = False) -> tuple[str, List[Any]]:
     """
     Builds the SQL query and parameters from targeting criteria.
@@ -733,6 +735,8 @@ def lemmatize_expression(expression: str, conn) -> str:
 
     # Split words by space
     words = expression.split()
+    print(f"words:{words}")
+
 
     # Lowercase for consistency
     words_lower = [w.lower() for w in words]
@@ -742,11 +746,38 @@ def lemmatize_expression(expression: str, conn) -> str:
     sql = f"SELECT entree, lemme FROM DicoFrance WHERE entree IN ({format_strings})"
     cursor.execute(sql, tuple(words_lower))
     results = cursor.fetchall()
+    # --- TRACE DES RÉSULTATS SQL ---
+    if results:
+        for row in results:
+            try:
+                # On tente l'accès par index (pour les tuples)
+                e = row[0]
+                l = row[1]
+            except (KeyError, TypeError):
+                # Si ça échoue, on tente l'accès par clé (pour les dictionnaires)
+                e = row['entree']
+                l = row['lemme']
+                
+   
+    # Reconstruction visuelle (pour le debug)
+    formatted_words = ", ".join([f"'{w}'" for w in words_lower])
 
+    # 2. On l'insère dans la requête de debug
+    debug_sql = f"SELECT entree, lemme FROM DicoFrance WHERE entree IN ({formatted_words})"
+
+  
     # Map: word -> lemma
-    lemma_map = {r['entree']: r['lemme'] for r in results if r['lemme']}
+    lemma_map = {}
+    for r in results:
+        if r['lemme']:
+            # On récupère l'entrée (ex: 'immobilières')
+            entree_brute = r['entree']
+            # On enlève l'accent (ex: 'immobilieres')
+            entree_norm, _ = removeaccent(entree_brute, "no")
+            # On stocke dans le dictionnaire
+            lemma_map[entree_norm] = r['lemme']
 
-    # Replace words with lemma if found
+    # Remplacement des mots originaux par leur lemme si présent dans la map
     lemmatized_words = [lemma_map.get(w, w) for w in words_lower]
 
     # Join back into a string
@@ -857,7 +888,7 @@ def count_semantic(original_request, debug_sql, conn, flag_count=False):
     else:
         expr_lem = lemmatize_expression( remove_stop_words_french(original_request_normalized_without_dash, True, False), conn)  # e.g., "directeur immobilier"
         expr_boolean = ' '.join(f'+{word}' for word in expr_lem.split())
-        #print(f"expr_lem:{expr_lem}")
+       
    
 
     # ---- 4️⃣ Convert to Boolean mode format ----
@@ -2391,3 +2422,34 @@ def invoice_edition(stripe_id, conn):
     status = generate_professional_invoice(invoice_json, local_invoice_file_path)
 
     return status, invoice_remote_file_path, local_invoice_file_path
+
+
+# --- 1. Fonction d'insertion (exécutée en tâche de fond via Threading) ---
+def insert_into_mysql_direct(data):
+    """
+    S'exécute en parallèle pour ne pas bloquer la réponse de l'API.
+    """
+    try:
+        # On utilise tes configs existantes ou os.getenv
+        conn            = get_db_connection()
+        cursor          = conn.cursor(dictionary=True)
+        print(f"data:{data}")
+        
+        query = """
+            INSERT INTO ia_bot_user_events (session_id, event_type, source, timestamp)
+            VALUES (%s, %s, %s, NOW())
+        """
+        values = (
+            data.get('session_id'), 
+            data.get('event_type'), 
+            data.get('source', 'front')
+        )
+        
+        cursor.execute(query, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        if VERBOSE:
+            print("✅ [MySQL] Log inséré avec succès.")
+    except Exception as e:
+        print(f"❌ [MySQL] Erreur direct: {e}")

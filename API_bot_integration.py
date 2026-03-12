@@ -3,11 +3,12 @@ from datetime import datetime
 # import mysql.connector
 # from mysql.connector import Error
 # from typing import Dict, Any, List, Optional
-# import os
+import os
 # from datetime import date, datetime
 # from typing import Dict, List, Tuple
 # import logging
 import sys
+import threading
 # import time
 # import json
 # from functools import wraps
@@ -34,7 +35,7 @@ from API_bot_parameters_integration import DB_CONFIG_ikoula3, DB_CONFIG_ekima, F
 
 # doc import functions
 import API_bot_library
-from API_bot_library import normalize_geo, require_api_key_v1, trafic_control, query_control, memory_guard, require_api_key_v2, count_companies_logic, get_company_info
+from API_bot_library import insert_into_mysql_direct, normalize_geo, require_api_key_v1, trafic_control, query_control, memory_guard, require_api_key_v2, count_companies_logic, get_company_info
 
 from API_bot_library import VERBOSE
 
@@ -318,6 +319,38 @@ def get_info_success_page():
         "success": True
     }), 200
 
+
+@app.route('/log-event', methods=['POST', 'OPTIONS'], strict_slashes=False)
+def log_event():
+    # 1. Réponse immédiate pour le navigateur (CORS Preflight)
+    if request.method == 'OPTIONS':
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, x-api-key")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+
+    # 2. Récupération des données
+    data = request.get_json(silent=True)
+    
+    if VERBOSE:
+        print(f"************DEBUG Passage via log-event : {data}")
+
+    if not data:
+        return jsonify({"status": "error", "message": "No data"}), 400
+
+    # 3. Lancement du thread (Utilise ta fonction importée de API_bot_library)
+    try:
+        thread = threading.Thread(target=insert_into_mysql_direct, args=(data,))
+        thread.daemon = True
+        thread.start()
+    except Exception as e:
+        print(f"❌ Erreur Thread : {e}")
+
+    # 4. Réponse finale avec headers CORS
+    resp = jsonify({"status": "processing"})
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp, 200
 
 
 @app.route('/health', methods=['GET'])
